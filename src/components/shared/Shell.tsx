@@ -1,7 +1,6 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
 interface NavItem { href: string; label: string; icon: string }
@@ -10,6 +9,12 @@ interface ShellProps {
   userName: string
   schoolName: string
   children: React.ReactNode
+}
+
+declare global {
+  interface Window {
+    __driveIndiaHistoryPatched?: boolean
+  }
 }
 
 const adminNav: NavItem[] = [
@@ -23,7 +28,7 @@ const adminNav: NavItem[] = [
   { href:'/admin/reports',     label:'Reports',     icon:'▨' },
 ]
 const instructorNav: NavItem[] = [
-  { href:'/instructor/today',    label:'Today',      icon:'▦' },
+  { href:'/instructor/attendance', label:'Attendance', icon:'✓' },
   { href:'/instructor/batches',  label:'Batches',    icon:'◈' },
   { href:'/instructor/students', label:'Students',   icon:'◉' },
   { href:'/instructor/progress', label:'Progress',   icon:'◫' },
@@ -71,11 +76,44 @@ function MoreMenu({ nav, pathname }: { nav: NavItem[]; pathname: string }) {
 }
 
 export default function Shell({ role, userName, schoolName, children }: ShellProps) {
-  const pathname   = usePathname()
+  const [pathname, setPathname] = useState('/')
   const nav        = role === 'admin' ? adminNav : instructorNav
   const bottomNav  = role === 'admin' ? adminBottomNav : instructorBottomNav
   const moreNav    = role === 'admin' ? adminNav.slice(4) : instructorNav.slice(4)
   const initials   = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const updatePathname = () => setPathname(window.location.pathname || '/')
+    updatePathname()
+
+    if (!window.__driveIndiaHistoryPatched) {
+      window.__driveIndiaHistoryPatched = true
+      const originalPushState = window.history.pushState
+      const originalReplaceState = window.history.replaceState
+
+      window.history.pushState = function (...args) {
+        const result = originalPushState.apply(this, args)
+        window.dispatchEvent(new Event('driveindia:navigate'))
+        return result
+      }
+
+      window.history.replaceState = function (...args) {
+        const result = originalReplaceState.apply(this, args)
+        window.dispatchEvent(new Event('driveindia:navigate'))
+        return result
+      }
+    }
+
+    window.addEventListener('popstate', updatePathname)
+    window.addEventListener('driveindia:navigate', updatePathname)
+
+    return () => {
+      window.removeEventListener('popstate', updatePathname)
+      window.removeEventListener('driveindia:navigate', updatePathname)
+    }
+  }, [])
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -108,6 +146,11 @@ export default function Shell({ role, userName, schoolName, children }: ShellPro
               <button type="submit" className="text-xs text-gray-400 hover:text-gray-600 transition">Out</button>
             </form>
           </div>
+          {role === 'admin' && (
+            <Link href="/admin/profile" className="mt-3 block text-xs text-emerald-600 hover:underline">
+              Profile
+            </Link>
+          )}
         </div>
       </aside>
 

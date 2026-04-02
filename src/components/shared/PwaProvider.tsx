@@ -7,6 +7,7 @@ export default function PwaProvider({ children }: { children: React.ReactNode })
   const [isInstalled, setIsInstalled] = useState(false)
 
   useEffect(() => {
+    let updateTimer: ReturnType<typeof setInterval> | null = null
     // Register service worker
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker
@@ -14,7 +15,9 @@ export default function PwaProvider({ children }: { children: React.ReactNode })
         .then(reg => {
           console.log('[PWA] Service worker registered:', reg.scope)
           // Check for updates every 60 seconds
-          setInterval(() => reg.update(), 60_000)
+          updateTimer = setInterval(() => {
+            reg.update().catch(err => console.warn('[PWA] SW update skipped:', err))
+          }, 60_000)
         })
         .catch(err => console.error('[PWA] SW registration failed:', err))
     }
@@ -45,7 +48,10 @@ export default function PwaProvider({ children }: { children: React.ReactNode })
       setShowBanner(true)
     }
 
-    return () => window.removeEventListener('beforeinstallprompt', handler)
+    return () => {
+      if (updateTimer) clearInterval(updateTimer)
+      window.removeEventListener('beforeinstallprompt', handler)
+    }
   }, [])
 
   async function install() {

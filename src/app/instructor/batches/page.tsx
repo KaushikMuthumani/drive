@@ -3,7 +3,7 @@ import { db } from '@/lib/db/client'
 import { attendance, batches, students } from '@/db/schema'
 import { getSessionWithUser } from '@/lib/auth/session'
 import Shell from '@/components/shared/Shell'
-import InstructorStudents from '@/components/instructor/InstructorStudents'
+import InstructorBatches from '@/components/instructor/InstructorBatches'
 
 export default async function InstructorBatchesPage() {
   const { user, school } = await getSessionWithUser()
@@ -17,7 +17,7 @@ export default async function InstructorBatchesPage() {
   const myAttendance = allAttendance.filter(record => myStudents.some(student => student.id === record.student_id))
   return (
     <Shell role="instructor" userName={user.name} schoolName={school.name}>
-      <InstructorStudents students={myStudents} batches={myBatches} attendance={myAttendance} />
+      <InstructorBatches batches={myBatches} students={myStudents} attendance={myAttendance} />
     </Shell>
   )
 }

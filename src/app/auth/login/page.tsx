@@ -16,7 +16,7 @@ export default function LoginPage() {
     fetch('/api/auth/me')
       .then(r => r.json())
       .then(d => {
-        if (d.authenticated) router.replace(d.user.role === 'admin' ? '/admin/dashboard' : '/instructor/schedule')
+        if (d.authenticated) router.replace(d.user.role === 'admin' ? '/admin/dashboard' : '/instructor/attendance')
         else setChecking(false)
       })
       .catch(() => setChecking(false))
@@ -28,10 +28,10 @@ export default function LoginPage() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone, password }),
     })
-    const data = await res.json()
+    const data = await res.json().catch(() => ({ error: 'Login failed. Server returned an invalid response.' }))
     setLoading(false)
     if (!res.ok) { setError(data.error || 'Invalid phone or password'); return }
-    router.replace(data.user.role === 'admin' ? '/admin/dashboard' : '/instructor/schedule')
+    router.replace(data.user.role === 'admin' ? '/admin/dashboard' : '/instructor/attendance')
   }
 
   if (checking) return (

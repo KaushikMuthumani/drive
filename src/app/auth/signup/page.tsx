@@ -48,7 +48,7 @@ export default function SignupPage() {
         password:       form.password,
       }),
     })
-    const data = await res.json()
+    const data = await res.json().catch(() => ({ error: 'Registration failed. Server returned an invalid response.' }))
     setLoading(false)
     if (!res.ok) { setError(typeof data.error === 'string' ? data.error : 'Registration failed. Please check your details.'); return }
     router.replace('/admin/dashboard')

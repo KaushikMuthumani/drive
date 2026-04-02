@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Button, Badge, Avatar, Input, Select, Modal, Card, ProgressBar } from '@/components/ui'
 import PageHeader from '@/components/shared/PageHeader'
 import { formatDate } from '@/lib/utils'
@@ -26,14 +25,12 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 export default function StudentsPage({ students: initial, batches, schoolId }: Props) {
-  const pathname = usePathname()
-  const router = useRouter()
-  const searchParams = useSearchParams()
   const [students, setStudents]   = useState(initial)
   const [search, setSearch]       = useState('')
   const [showModal, setShowModal] = useState(false)
   const [loading, setLoading]     = useState(false)
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null)
+  const [enrollFromQuery, setEnrollFromQuery] = useState(false)
   const [form, setForm] = useState({
     name: '', phone: '', course_type: '4-wheeler',
     batch_id: '', day_pref: 'weekdays', preferred_time: '07:00',
@@ -49,9 +46,12 @@ export default function StudentsPage({ students: initial, batches, schoolId }: P
   )
 
   useEffect(() => {
-    if (searchParams.get('enroll') !== '1') return
+    if (typeof window === 'undefined') return
 
-    const batchId = searchParams.get('batchId') ?? ''
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('enroll') !== '1') return
+
+    const batchId = params.get('batchId') ?? ''
     const batch = batches.find(b => b.id === batchId)
     if (batch) {
       setForm(f => ({
@@ -62,8 +62,9 @@ export default function StudentsPage({ students: initial, batches, schoolId }: P
         preferred_time: batch.slot_time?.slice(0, 5) ?? f.preferred_time,
       }))
     }
+    setEnrollFromQuery(true)
     setShowModal(true)
-  }, [batches, searchParams])
+  }, [batches])
 
   async function enroll() {
     setLoading(true)
@@ -79,7 +80,14 @@ export default function StudentsPage({ students: initial, batches, schoolId }: P
     const data = await res.json()
     setLoading(false)
     if (!res.ok) { toast.error(getErrorMessage(data.error, 'Enrollment failed')); return }
-    setStudents(p => [data.data, ...p])
+    setStudents(p => [{
+      ...data.data,
+      fee: {
+        total_amount: Number(form.fee_amount).toFixed(2),
+        paid_amount: '0.00',
+        payment_status: 'unpaid',
+      },
+    }, ...p])
     closeEnrollModal()
     setForm({ name: '', phone: '', course_type: '4-wheeler', batch_id: '', day_pref: 'weekdays', preferred_time: '07:00', fee_amount: '' })
     if (data.portal_url && navigator.clipboard) {
@@ -94,8 +102,14 @@ export default function StudentsPage({ students: initial, batches, schoolId }: P
 
   function closeEnrollModal() {
     setShowModal(false)
-    if (searchParams.get('enroll') === '1') {
-      router.replace(pathname)
+    if (enrollFromQuery && typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('enroll')
+      url.searchParams.delete('batchId')
+      const nextSearch = url.searchParams.toString()
+      const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ''}`
+      window.history.replaceState({}, '', nextUrl)
+      setEnrollFromQuery(false)
     }
   }
 
@@ -121,9 +135,31 @@ export default function StudentsPage({ students: initial, batches, schoolId }: P
       return
     }
 
-    setStudents(prev => prev.map(student => student.id === selectedStudent.id ? data.data : student))
-    setSelectedStudent(data.data)
+    const nextStudent = { ...data.data, fee: selectedStudent.fee ?? null }
+    setStudents(prev => prev.map(student => student.id === selectedStudent.id ? nextStudent : student))
+    setSelectedStudent(nextStudent)
     toast.success('Student updated')
+  }
+
+  async function updateSelectedFee(updates: { total_amount: number; paid_amount: number }, successMessage: string) {
+    if (!selectedStudent) return
+
+    const res = await fetch(`/api/fees/${selectedStudent.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      toast.error(getErrorMessage(data.error, 'Failed to update fee details'))
+      return
+    }
+
+    setStudents(prev => prev.map(student => (
+      student.id === selectedStudent.id ? { ...student, fee: data.data } : student
+    )))
+    setSelectedStudent((student: any) => ({ ...student, fee: data.data }))
+    toast.success(successMessage)
   }
 
   function completedSessions(student: any) {
@@ -311,14 +347,36 @@ export default function StudentsPage({ students: initial, batches, schoolId }: P
 
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-xl bg-gray-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Student name</p>
+                <Input
+                  value={selectedStudent.name}
+                  onChange={e => setSelectedStudent((student: any) => ({ ...student, name: e.target.value }))}
+                />
+              </div>
+              <div className="rounded-xl bg-gray-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Phone</p>
+                <Input
+                  value={selectedStudent.phone}
+                  maxLength={10}
+                  onChange={e => setSelectedStudent((student: any) => ({ ...student, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                />
+              </div>
+              <div className="rounded-xl bg-gray-50 p-3">
                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Course</p>
                 <p className="font-medium text-gray-800">{selectedStudent.course_type}</p>
               </div>
               <div className="rounded-xl bg-gray-50 p-3">
                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Status</p>
-                <Badge variant={selectedStudent.status==='active'?'green':selectedStudent.status==='completed'?'blue':selectedStudent.status==='on_hold'?'amber':'gray'}>
-                  {selectedStudent.status}
-                </Badge>
+                <Select
+                  value={selectedStudent.status}
+                  onChange={e => setSelectedStudent((student: any) => ({ ...student, status: e.target.value }))}
+                >
+                  <option value="enrolled">enrolled</option>
+                  <option value="active">active</option>
+                  <option value="completed">completed</option>
+                  <option value="on_hold">on_hold</option>
+                  <option value="dropped">dropped</option>
+                </Select>
               </div>
               <div className="rounded-xl bg-gray-50 p-3">
                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Batch</p>
@@ -343,6 +401,99 @@ export default function StudentsPage({ students: initial, batches, schoolId }: P
                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Enrolled</p>
                 <p className="font-medium text-gray-800">{formatDate(selectedStudent.enrolled_at)}</p>
               </div>
+            </div>
+
+            <Button
+              variant="primary"
+              className="w-full justify-center"
+              onClick={() => updateSelectedStudent({
+                name: selectedStudent.name,
+                phone: selectedStudent.phone,
+                status: selectedStudent.status,
+              })}
+            >
+              Save student details
+            </Button>
+
+            <div className="rounded-xl border border-gray-100 p-4">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <p className="text-xs uppercase tracking-wide text-gray-500">Fees</p>
+                {selectedStudent.fee && (
+                  <Badge variant={selectedStudent.fee.payment_status === 'paid' ? 'green' : selectedStudent.fee.payment_status === 'partial' ? 'amber' : 'red'}>
+                    {selectedStudent.fee.payment_status}
+                  </Badge>
+                )}
+              </div>
+
+              {selectedStudent.fee ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-gray-50 p-3">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Total fee</p>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={selectedStudent.fee.total_amount ?? ''}
+                        onChange={e => setSelectedStudent((student: any) => ({
+                          ...student,
+                          fee: { ...student.fee, total_amount: e.target.value },
+                        }))}
+                      />
+                    </div>
+                    <div className="rounded-xl bg-gray-50 p-3">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Paid amount</p>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={selectedStudent.fee.paid_amount ?? ''}
+                        onChange={e => setSelectedStudent((student: any) => ({
+                          ...student,
+                          fee: { ...student.fee, paid_amount: e.target.value },
+                        }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-gray-50 p-3 text-sm text-gray-600">
+                    Balance: ₹{Math.max(0, Number(selectedStudent.fee.total_amount || 0) - Number(selectedStudent.fee.paid_amount || 0)).toLocaleString('en-IN')}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button
+                      className="justify-center"
+                      onClick={() => updateSelectedFee({
+                        total_amount: Number(selectedStudent.fee.total_amount || 0),
+                        paid_amount: Number(selectedStudent.fee.paid_amount || 0),
+                      }, 'Fee details updated')}
+                    >
+                      Save fees
+                    </Button>
+                    <Button
+                      className="justify-center"
+                      onClick={() => updateSelectedFee({
+                        total_amount: Number(selectedStudent.fee.total_amount || 0),
+                        paid_amount: Number(selectedStudent.fee.paid_amount || 0) > 0
+                          ? Number(selectedStudent.fee.paid_amount || 0)
+                          : Math.min(Number(selectedStudent.fee.total_amount || 0), Math.round(Number(selectedStudent.fee.total_amount || 0) / 2)),
+                      }, 'Initial payment marked')}
+                    >
+                      Initial payment
+                    </Button>
+                    <Button
+                      variant="primary"
+                      className="justify-center"
+                      onClick={() => updateSelectedFee({
+                        total_amount: Number(selectedStudent.fee.total_amount || 0),
+                        paid_amount: Number(selectedStudent.fee.total_amount || 0),
+                      }, 'Full payment marked')}
+                    >
+                      Full payment
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400">No fee record found for this student.</p>
+              )}
             </div>
 
             <div className="rounded-xl border border-gray-100 p-3">

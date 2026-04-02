@@ -2,22 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
-import { students } from '@/db/schema'
+import { fees, students } from '@/db/schema'
 import { verifyToken } from '@/lib/auth/jwt'
 
-const updateSchema = z.object({
-  name: z.string().min(2).optional(),
-  phone: z.string().length(10).optional(),
-  batch_id: z.preprocess(
-    value => value === '' || value == null ? null : value,
-    z.string().uuid().nullable().optional()
-  ),
-  day_pref: z.enum(['weekdays', 'weekends', 'all']).optional(),
-  preferred_time: z.preprocess(
-    value => value === '' || value == null ? null : value,
-    z.string().nullable().optional()
-  ),
-  status: z.enum(['enrolled', 'active', 'completed', 'on_hold', 'dropped']).optional(),
+const updateFeeSchema = z.object({
+  total_amount: z.coerce.number().positive(),
+  paid_amount: z.coerce.number().min(0),
 })
 
 export async function PATCH(req: NextRequest, { params }: { params: { studentId: string } }) {
@@ -28,7 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { studentId:
   if (payload.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json()
-  const parsed = updateSchema.safeParse(body)
+  const parsed = updateFeeSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
   const [student] = await db.select().from(students).where(
@@ -37,18 +27,30 @@ export async function PATCH(req: NextRequest, { params }: { params: { studentId:
 
   if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
 
-  const updates = Object.fromEntries(
-    Object.entries(parsed.data).filter(([, value]) => value !== undefined)
-  )
+  const totalAmount = Number(parsed.data.total_amount)
+  const paidAmount = Number(parsed.data.paid_amount)
 
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ data: student })
+  if (paidAmount > totalAmount) {
+    return NextResponse.json({ error: 'Paid amount cannot exceed total amount' }, { status: 400 })
   }
 
-  const [updated] = await db.update(students)
-    .set(updates as any)
-    .where(eq(students.id, params.studentId))
+  const paymentStatus = paidAmount <= 0
+    ? 'unpaid'
+    : paidAmount >= totalAmount
+      ? 'paid'
+      : 'partial'
+
+  const [updated] = await db.update(fees)
+    .set({
+      total_amount: totalAmount.toFixed(2),
+      paid_amount: paidAmount.toFixed(2),
+      payment_status: paymentStatus as any,
+      paid_at: paidAmount > 0 ? new Date() : null,
+    })
+    .where(eq(fees.student_id, params.studentId))
     .returning()
+
+  if (!updated) return NextResponse.json({ error: 'Fee record not found' }, { status: 404 })
 
   return NextResponse.json({ data: updated })
 }

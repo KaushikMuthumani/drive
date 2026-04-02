@@ -8,7 +8,7 @@ export default async function RootPage() {
   if (token) {
     try {
       const payload = await verifyToken(token)
-      redirect(payload.role === 'admin' ? '/admin/dashboard' : '/instructor/schedule')
+      redirect(payload.role === 'admin' ? '/admin/dashboard' : '/instructor/attendance')
     } catch {
       // invalid token — fall through to homepage
     }
