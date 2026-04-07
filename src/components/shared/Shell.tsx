@@ -1,7 +1,7 @@
 'use client'
+'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
 interface NavItem { href: string; label: string; icon: string }
@@ -26,7 +26,6 @@ const instructorNav: NavItem[] = [
 ]
 
 function ProfilePopover({ name, role, onClose }: { name: string; role: string; onClose: () => void }) {
-  const router = useRouter()
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -35,12 +34,12 @@ function ProfilePopover({ name, role, onClose }: { name: string; role: string; o
   }, [])
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' })
-    router.replace('/auth/login')
+    window.location.href = '/auth/login'
   }
   const profileHref = role === 'admin' ? '/admin/profile' : '/instructor/profile'
   return (
     <div ref={ref} className="absolute bottom-full left-0 mb-2 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 w-48 z-50">
-      <Link href={profileHref} onClick={onClose}
+      <Link href={profileHref} onClick={() => onClose()}
         className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition">
         <span className="text-xs opacity-60">⊙</span> Edit profile
       </Link>
@@ -87,8 +86,31 @@ function MoreMenu({ nav, pathname }: { nav: NavItem[]; pathname: string }) {
 export default function Shell({ role, userName, schoolName, children }: {
   role: 'admin' | 'instructor'; userName: string; schoolName: string; children: React.ReactNode
 }) {
-  const pathname = usePathname()
   const [showProfile, setShowProfile] = useState(false)
+  const [pathname, setPathname] = useState('/')
+  useEffect(() => {
+    const set = () => setPathname(window.location.pathname)
+    set()
+    const onPop = () => set()
+    window.addEventListener('popstate', onPop)
+    const pushState = window.history.pushState
+    const replaceState = window.history.replaceState
+    window.history.pushState = function (...args) {
+      const result = pushState.apply(this, args)
+      set()
+      return result
+    }
+    window.history.replaceState = function (...args) {
+      const result = replaceState.apply(this, args)
+      set()
+      return result
+    }
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      window.history.pushState = pushState
+      window.history.replaceState = replaceState
+    }
+  }, [])
   const nav       = role === 'admin' ? adminNav : instructorNav
   const bottomNav = nav.slice(0, 4)
   const moreNav   = nav.slice(4)
@@ -155,8 +177,8 @@ export default function Shell({ role, userName, schoolName, children }: {
         <main className="flex-1 overflow-y-auto pb-24 md:pb-0">{children}</main>
 
         {/* Mobile bottom nav */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex z-40"
-          style={{ paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex z-40"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
           {bottomNav.map(item => {
             const active = pathname.startsWith(item.href)
             return (

@@ -1,10 +1,22 @@
 'use client'
-import { useState } from 'react'
+import { useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import { Button, Input, Card } from '@/components/ui'
 import PageHeader from '@/components/shared/PageHeader'
 import { toast } from 'sonner'
 
 interface Props { user: any; school: any; settings: any; isAdmin: boolean }
+
+const QR_ACCEPTED_TYPES = ['image/png', 'image/jpeg']
+const QR_MAX_SIZE = 500 * 1024
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
 
 export default function ProfilePage({ user: u, school: s, settings: st, isAdmin }: Props) {
   const [user,       setUser]     = useState(u)
@@ -15,6 +27,51 @@ export default function ProfilePage({ user: u, school: s, settings: st, isAdmin 
   const [editUpi,    setEditUpi]  = useState(false)
   const [newPwd,     setNewPwd]   = useState('')
   const [loading,    setLoading]  = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [dragActive, setDragActive] = useState(false)
+
+  async function handleQrFile(file: File) {
+    if (!QR_ACCEPTED_TYPES.includes(file.type)) {
+      toast.error('Only PNG and JPG files are accepted')
+      return
+    }
+    if (file.size > QR_MAX_SIZE) {
+      toast.error('Please upload an image smaller than 500KB')
+      return
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      setSettings(s => ({ ...s, upi_qr_url: dataUrl }))
+    } catch {
+      toast.error('Failed to read the image')
+    }
+  }
+
+  function handleQrInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    if (file) {
+      void handleQrFile(file)
+    }
+    event.currentTarget.value = ''
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setDragActive(true)
+  }
+
+  function handleDragLeave() {
+    setDragActive(false)
+  }
+
+  async function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setDragActive(false)
+    const file = event.dataTransfer?.files?.[0]
+    if (file) {
+      await handleQrFile(file)
+    }
+  }
 
   async function saveUser() {
     setLoading(true)
@@ -126,8 +183,39 @@ export default function ProfilePage({ user: u, school: s, settings: st, isAdmin 
               <div className="space-y-3">
                 <Input label="Your UPI ID" value={settings.upi_id ?? ''} onChange={e=>setSettings((s: any)=>({...s,upi_id:e.target.value}))}
                   placeholder="e.g. yourname@okicici" hint="Students will see this on their fee page" />
-                <Input label="QR code image URL (optional)" value={settings.upi_qr_url ?? ''} onChange={e=>setSettings((s: any)=>({...s,upi_qr_url:e.target.value}))}
-                  placeholder="Paste image URL from your GPay QR" />
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">QR code image</p>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className={`relative rounded-xl border-2 border-dashed px-4 py-6 text-center transition ${
+                      dragActive ? 'border-green-400 bg-green-50' : 'border-slate-200 bg-white'
+                    }`}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={handleDragOver}
+                    onDragEnter={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
+                    <input type="file" accept="image/png,image/jpeg" className="hidden" ref={fileInputRef}
+                      onChange={handleQrInputChange} />
+                    <p className="text-sm font-semibold text-slate-800">Tap or drag QR code here</p>
+                    <p className="text-xs text-slate-400 mt-1">PNG or JPG, up to 500KB</p>
+                    {settings.upi_qr_url ? (
+                      <>
+                        <div className="mt-3 flex justify-center">
+                          <img src={settings.upi_qr_url} alt="UPI QR" className="w-32 h-32 object-contain border border-slate-200 rounded-lg" />
+                        </div>
+                        <button type="button" onClick={() => setSettings(s => ({ ...s, upi_qr_url: '' }))}
+                          className="text-xs text-slate-500 hover:text-slate-800 mt-2">
+                          Remove image
+                        </button>
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-400 mt-2">Preview will appear here after uploading</p>
+                    )}
+                  </div>
+                </div>
                 <Button variant="primary" loading={loading} onClick={saveUpi} className="w-full justify-center">Save UPI settings</Button>
               </div>
             ) : (

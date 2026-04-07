@@ -39,7 +39,7 @@ export default function AdminDashboard({
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-4xl">
+    <div className="p-4 md:p-6">
       <div className="flex items-start justify-between mb-5">
         <div>
           <h1 className="text-lg font-semibold text-slate-900">Dashboard</h1>
@@ -100,7 +100,12 @@ export default function AdminDashboard({
             <div key={p.id} className="flex items-center gap-3 px-4 py-3 border-b border-slate-50 last:border-0">
               <div className="flex-1">
                 <p className="text-sm font-medium text-slate-800">{formatINR(Number(p.amount))} via {p.payment_mode}</p>
-                <p className="text-xs text-slate-400">{formatDate(p.paid_at)}</p>
+                <p className="text-xs text-slate-400">
+                  {formatDate(p.paid_at)}
+                  {p.studentName && (
+                    <span className="ml-2 text-slate-600">· {p.studentName}</span>
+                  )}
+                </p>
               </div>
               <button onClick={() => confirmPayment(p.id)} disabled={confirming === p.id}
                 className="bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 transition">

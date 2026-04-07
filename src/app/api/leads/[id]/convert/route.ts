@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { leads, students, rto_records, fees } from '@/db/schema'
 import { verifyToken } from '@/lib/auth/jwt'
+import { revalidatePath } from 'next/cache'
 import { COURSE_SESSIONS, generatePortalToken } from '@/lib/course/config'
 
 const schema = z.object({
@@ -50,6 +51,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     .set({ status: 'enrolled' as any, converted_student_id: student.id, updated_at: new Date() })
     .where(eq(leads.id, params.id))
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  return NextResponse.json({ data: student, portal_url: `${appUrl}/s/${portal_token}` }, { status: 201 })
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const portal_url = appUrl ? `${appUrl}/s/${portal_token}` : `/s/${portal_token}`
+  revalidatePath('/admin/students')
+  revalidatePath('/admin/dashboard')
+  return NextResponse.json({ data: student, portal_url }, { status: 201 })
 }

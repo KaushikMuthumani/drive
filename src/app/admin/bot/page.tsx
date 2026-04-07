@@ -9,7 +9,6 @@ export default async function AdminBotPage() {
       <BotSetupPage
         botToken={process.env.TELEGRAM_BOT_TOKEN ? 'configured' : 'not_set'}
         adminChatId={process.env.TELEGRAM_ADMIN_CHAT_ID ?? ''}
-        appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ''}
       />
     </Shell>
   )

@@ -106,7 +106,7 @@ export default function BatchesPage({ batches: initial, instructors, vehicles, s
 
   async function updateStudent(studentId: string, updates: Record<string, unknown>) {
     const res = await fetch(`/api/students/${studentId}`, {
-      method: 'PATCH',
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
     })

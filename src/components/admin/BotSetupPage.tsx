@@ -7,10 +7,9 @@ import { toast } from 'sonner'
 interface Props {
   botToken: string
   adminChatId: string
-  appUrl: string
 }
 
-export default function BotSetupPage({ botToken, adminChatId, appUrl }: Props) {
+export default function BotSetupPage({ botToken, adminChatId }: Props) {
   const [registering, setRegistering] = useState(false)
   const [result, setResult]           = useState<string | null>(null)
 
@@ -19,13 +18,15 @@ export default function BotSetupPage({ botToken, adminChatId, appUrl }: Props) {
   async function registerWebhook() {
     setRegistering(true)
     try {
-      const res  = await fetch('/api/bot/telegram?setup=1')
+      const origin = window.location.origin
+      const res = await fetch(`/api/bot/telegram?setup=1&origin=${encodeURIComponent(origin)}`)
       const data = await res.json()
       if (data.webhook_set) {
         setResult(`✓ Webhook registered at ${data.url}`)
         toast.success('Webhook registered successfully')
       } else {
-        setResult(`Failed: ${JSON.stringify(data)}`)
+        const err = data.error ?? data.description ?? JSON.stringify(data)
+        setResult(`Failed: ${err}`)
         toast.error('Webhook registration failed')
       }
     } catch (e) {
@@ -161,22 +162,6 @@ TELEGRAM_ADMIN_PHONE=your_10_digit_phone`}</pre>
         </div>
       </Card>
 
-      {/* Zero cost breakdown */}
-      <div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4">
-        <p className="text-sm font-semibold text-green-800 mb-2">Cost breakdown — ₹0/month</p>
-        <div className="space-y-1">
-          {[
-            ['Telegram Bot API', 'Free — no per-message cost, no approval needed'],
-            ['Vercel webhook endpoint', 'Free tier — handles the incoming messages'],
-            ['Claude API', 'Pay-per-use — ~₹0.05 per message at current pricing'],
-          ].map(([item, note]) => (
-            <div key={item} className="flex gap-2 text-xs">
-              <span className="text-green-700 font-medium min-w-[140px]">{item}</span>
-              <span className="text-green-600">{note}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }

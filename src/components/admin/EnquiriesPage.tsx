@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Button, Badge, Card, Modal, Input, Select, Empty } from '@/components/ui'
 import PageHeader from '@/components/shared/PageHeader'
 import { formatDate } from '@/lib/utils'
+import { TIME_SLOTS } from '@/lib/course/config'
 import { toast } from 'sonner'
 
 interface Props { leads: any[] }
@@ -17,12 +18,17 @@ const badgeV: Record<string,'gray'|'amber'|'green'|'blue'|'red'> = {
   new:'gray', called:'amber', interested:'green', enrolled:'blue', lost:'red'
 }
 
+const DEFAULT_CONVERT_FORM = { fee_amount: '', day_pref: 'weekdays', preferred_time: '07:00' }
+
 export default function EnquiriesPage({ leads: initial }: Props) {
   const [leads, setLeads]       = useState(initial)
   const [selected, setSelected] = useState<any>(null)
   const [showAdd, setShowAdd]   = useState(false)
   const [loading, setLoading]   = useState(false)
   const [addForm, setAddForm]   = useState({ name:'', phone:'', course_type:'4-wheeler', source:'phone', notes:'' })
+  const [convertLead, setConvertLead] = useState<any>(null)
+  const [convertForm, setConvertForm] = useState(() => ({ ...DEFAULT_CONVERT_FORM }))
+  const [converting, setConverting] = useState(false)
 
   const today = new Date().toISOString().split('T')[0]
   const followUpToday = leads.filter(l => l.follow_up_at === today && l.status !== 'enrolled' && l.status !== 'lost').length
@@ -59,6 +65,43 @@ export default function EnquiriesPage({ leads: initial }: Props) {
     setLeads(p => p.map(l => l.id === id ? data.data : l))
     if (selected?.id === id) setSelected(data.data)
     toast.success('Updated')
+  }
+
+  async function convertLeadToStudent() {
+    if (!convertLead) return
+    const amount = Number(convertForm.fee_amount)
+    if (!amount || amount <= 0) {
+      toast.error('Enter a valid fee amount')
+      return
+    }
+    setConverting(true)
+    try {
+      const res = await fetch(`/api/leads/${convertLead.id}/convert`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          fee_amount: amount,
+          day_pref: convertForm.day_pref,
+          preferred_time: convertForm.preferred_time,
+        }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast.error(payload.error || 'Conversion failed')
+        return
+      }
+      setLeads(p => p.map(l => l.id === convertLead.id ? { ...l, status: 'enrolled', converted_student_id: payload.data?.id ?? l.converted_student_id } : l))
+      setConvertLead(null)
+      setConvertForm({ ...DEFAULT_CONVERT_FORM })
+      if (payload.portal_url && navigator.clipboard) {
+        navigator.clipboard.writeText(payload.portal_url)
+      }
+      toast.success('Lead converted · portal link copied')
+    } catch {
+      toast.error('Conversion failed')
+    } finally {
+      setConverting(false)
+    }
   }
 
   const convRate = stats.total > 0 ? Math.round((stats.enrolled / stats.total) * 100) : 0
@@ -162,8 +205,8 @@ export default function EnquiriesPage({ leads: initial }: Props) {
               {selected.status !== 'enrolled' && selected.status !== 'lost' && (
                 <Button variant="primary" className="w-full justify-center"
                   onClick={() => {
-                    const url = `/admin/students?convert=${selected.id}&name=${encodeURIComponent(selected.name)}&phone=${encodeURIComponent(selected.phone)}&course=${encodeURIComponent(selected.course_type)}`
-                    window.location.href = url
+                    setConvertLead(selected)
+                    setSelected(null)
                   }}>
                   Enroll this student →
                 </Button>
@@ -204,6 +247,43 @@ export default function EnquiriesPage({ leads: initial }: Props) {
           </div>
         </div>
       </Modal>
+
+      {/* Convert lead modal */}
+      {convertLead && (
+        <Modal open onClose={() => {
+          setConvertLead(null)
+          setConvertForm({ ...DEFAULT_CONVERT_FORM })
+        }} title="Enroll enquiry">
+          <div className="space-y-3">
+            <p className="text-sm text-slate-500">Creating student for {convertLead.name}</p>
+            <Input label="Fee amount (₹)" type="number" value={convertForm.fee_amount}
+              onChange={e => setConvertForm(f => ({ ...f, fee_amount: e.target.value }))}
+              placeholder="e.g. 4500" />
+            <Select label="Day preference" value={convertForm.day_pref}
+              onChange={e => setConvertForm(f => ({ ...f, day_pref: e.target.value }))}>
+              <option value="weekdays">Mon–Sat</option>
+              <option value="weekends">Sat–Sun</option>
+              <option value="all">Daily</option>
+            </Select>
+            <Select label="Preferred slot" value={convertForm.preferred_time}
+              onChange={e => setConvertForm(f => ({ ...f, preferred_time: e.target.value }))}>
+              {TIME_SLOTS.map(slot => (
+                <option key={slot} value={slot}>{slot}</option>
+              ))}
+            </Select>
+            <div className="flex gap-2">
+              <Button variant="primary" loading={converting} onClick={convertLeadToStudent} className="flex-1 justify-center"
+                disabled={converting || !convertForm.fee_amount}>
+                {converting ? 'Converting…' : 'Enroll & copy portal link'}
+              </Button>
+              <Button onClick={() => {
+                setConvertLead(null)
+                setConvertForm({ ...DEFAULT_CONVERT_FORM })
+              }}>Cancel</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

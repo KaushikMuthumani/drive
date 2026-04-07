@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
     payment_status: 'unpaid' as any,
   })
 
-  const appUrl     = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  const portal_url = `${appUrl}/s/${portal_token}`
+  const appUrl     = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const portal_url = appUrl ? `${appUrl}/s/${portal_token}` : `/s/${portal_token}`
   return NextResponse.json({ data: student, portal_url }, { status: 201 })
 }

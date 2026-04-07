@@ -22,6 +22,9 @@ export default function ReportsPage({ stats }: Props) {
     try {
       const res = await fetch('/api/export/excel')
       const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Export failed')
+      }
       // Use SheetJS-style CSV download since exceljs isn't available on edge
       const sheets: Record<string, any[]> = {
         Students: data.students, Batches: data.batches,
@@ -31,21 +34,37 @@ export default function ReportsPage({ stats }: Props) {
       for (const [name, rows] of Object.entries(sheets)) {
         if (!rows?.length) continue
         csv += `\n=== ${name} ===\n`
-        csv += Object.keys(rows[0]).join(',') + '\n'
-        rows.forEach(r => { csv += Object.values(r).map(v => `"${v ?? ''}"`).join(',') + '\n' })
+        const header = Object.keys(rows[0])
+        csv += header.map(h => `"${h.replace(/"/g, '""')}"`).join(',') + '\n'
+        rows.forEach(row => {
+          const values = header.map(key => {
+            const raw = row[key as keyof typeof row] ?? ''
+            const text = String(raw)
+            const sanitized = text.replace(/"/g, '""')
+            if (key.toLowerCase().includes('phone')) {
+              return `"='${sanitized}"`
+            }
+            return `"${sanitized}"`
+          })
+          csv += `${values.join(',')}\n`
+        })
       }
       const blob = new Blob([csv], { type:'text/csv' })
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href = url
       a.download = `DriveIndia_Export_${new Date().toISOString().split('T')[0]}.csv`
+      document.body.appendChild(a)
       a.click()
+      document.body.removeChild(a)
       URL.revokeObjectURL(url)
       toast.success('Export downloaded — open in Excel or Google Sheets')
-    } catch {
-      toast.error('Export failed')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Export failed'
+      toast.error(message)
+    } finally {
+      setExporting(false)
     }
-    setExporting(false)
   }
 
   return (
@@ -54,7 +73,14 @@ export default function ReportsPage({ stats }: Props) {
         action={
           <button onClick={exportExcel} disabled={exporting}
             className="border border-slate-200 text-slate-700 text-sm font-medium px-3 py-2 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 flex items-center gap-1.5">
-            {exporting ? '⏳' : '↓'} Export to Excel
+            {exporting ? (
+              <>
+                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Exporting…
+              </>
+            ) : (
+              '↓ Export to Excel'
+            )}
           </button>
         }
       />

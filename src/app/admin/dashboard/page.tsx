@@ -28,7 +28,12 @@ export default async function DashboardPage() {
 
   // Pending payment confirmations
   const allPayments    = studentIds.length ? await db.select().from(fee_payments) : []
-  const pendingPayments = allPayments.filter(p => studentIds.includes(p.student_id) && !p.is_confirmed)
+  const pendingPayments = allPayments
+    .filter(p => studentIds.includes(p.student_id) && !p.is_confirmed)
+    .map(p => ({
+      ...p,
+      studentName: studentById[p.student_id]?.name ?? '',
+    }))
 
   const feeMap         = Object.fromEntries(allFees.map(f => [f.student_id, f]))
   const unpaidStudents = allStudents.filter(s => { const f = feeMap[s.id]; return f && f.payment_status !== 'paid' })

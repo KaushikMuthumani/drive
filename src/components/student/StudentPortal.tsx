@@ -265,6 +265,12 @@ export default function StudentPortal({
                     <p className="text-xs text-slate-400 text-center mt-2">Your school will confirm and receipt will appear here</p>
                   </Card>
                 )}
+                {balanceFee > 0 && !upiSettings?.upi_id && (
+                  <Card className="p-4 text-center text-sm text-slate-500 space-y-1">
+                    <p className="font-semibold text-slate-800">Payment not set up</p>
+                    <p>Contact your school directly to complete the payment.</p>
+                  </Card>
+                )}
 
                 {balanceFee <= 0 && (
                   <Card className="p-6 text-center">

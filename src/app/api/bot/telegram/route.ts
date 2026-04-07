@@ -222,9 +222,16 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   if (searchParams.get('setup') !== '1') return NextResponse.json({ ok: true, message: 'Bot endpoint active' })
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  const origin = searchParams.get('origin')
+  const appUrl = origin ?? process.env.NEXT_PUBLIC_APP_URL
   if (!appUrl || !TG_TOKEN) {
     return NextResponse.json({ error: 'Set TELEGRAM_BOT_TOKEN and NEXT_PUBLIC_APP_URL in env' }, { status: 400 })
+  }
+
+  if (!appUrl.startsWith('https://')) {
+    return NextResponse.json({
+      error: 'Telegram requires an HTTPS webhook URL. Deploy the app (or tunnel via ngrok) and set NEXT_PUBLIC_APP_URL to the secure address before registering the webhook.',
+    }, { status: 400 })
   }
 
   const webhookUrl = `${appUrl}/api/bot/telegram`

@@ -4,6 +4,13 @@ import { db } from '@/lib/db/client'
 import { students, batches, sessions, attendance, rto_records, fees, users } from '@/db/schema'
 import { verifyToken } from '@/lib/auth/jwt'
 
+function formatExportDate(value?: string | Date | null) {
+  if (!value) return ''
+  const date = typeof value === 'string' ? new Date(value) : value
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toISOString().split('T')[0]
+}
+
 export async function GET(req: NextRequest) {
   const token = req.cookies.get('token')?.value
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -37,7 +44,7 @@ export async function GET(req: NextRequest) {
       'Sessions done': `${present(s.id)}/${batchMap[s.batch_id]?.total_sessions ?? '?'}`,
       'Present': present(s.id),
       'Absent': myAtt.filter((a: any) => a.student_id === s.id && a.status === 'absent').length,
-      Status: s.status, 'Enrolled on': s.enrolled_at?.split('T')[0] ?? '',
+      Status: s.status, 'Enrolled on': formatExportDate(s.enrolled_at),
     })),
     batches: allBatches.map((b: any) => ({
       Name: b.name, Instructor: instrMap[b.instructor_id] ?? '',
