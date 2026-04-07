@@ -4,7 +4,8 @@ import { Button, Input, Card } from '@/components/ui'
 import PageHeader from '@/components/shared/PageHeader'
 import { toast } from 'sonner'
 
-interface Props { user: any; school: any; settings: any; isAdmin: boolean }
+interface PaymentSettings { upi_id?: string | null; upi_qr_url?: string | null }
+interface Props { user: any; school: any; settings: PaymentSettings | null; isAdmin: boolean }
 
 const QR_ACCEPTED_TYPES = ['image/png', 'image/jpeg']
 const QR_MAX_SIZE = 500 * 1024
@@ -21,7 +22,7 @@ function readFileAsDataUrl(file: File) {
 export default function ProfilePage({ user: u, school: s, settings: st, isAdmin }: Props) {
   const [user,       setUser]     = useState(u)
   const [school,     setSchool]   = useState(s)
-  const [settings,   setSettings] = useState(st ?? { upi_id: '', upi_qr_url: '' })
+  const [settings,   setSettings] = useState<PaymentSettings>(st ?? { upi_id: '', upi_qr_url: '' })
   const [editUser,   setEditUser] = useState(false)
   const [editSchool, setEditSchool]= useState(false)
   const [editUpi,    setEditUpi]  = useState(false)
@@ -181,7 +182,7 @@ export default function ProfilePage({ user: u, school: s, settings: st, isAdmin 
           <div className="p-4">
             {editUpi ? (
               <div className="space-y-3">
-                <Input label="Your UPI ID" value={settings.upi_id ?? ''} onChange={e=>setSettings((s: any)=>({...s,upi_id:e.target.value}))}
+                <Input label="Your UPI ID" value={settings.upi_id ?? ''} onChange={e=>setSettings(s=>({...s,upi_id:e.target.value}))}
                   placeholder="e.g. yourname@okicici" hint="Students will see this on their fee page" />
                 <div className="space-y-2">
                   <p className="text-xs uppercase tracking-wide text-slate-500">QR code image</p>
