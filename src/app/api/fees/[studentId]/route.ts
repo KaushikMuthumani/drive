@@ -45,7 +45,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { studentId:
       total_amount: totalAmount.toFixed(2),
       paid_amount: paidAmount.toFixed(2),
       payment_status: paymentStatus as any,
-      paid_at: paidAmount > 0 ? new Date() : null,
     })
     .where(eq(fees.student_id, params.studentId))
     .returning()

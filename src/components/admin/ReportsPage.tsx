@@ -1,57 +1,89 @@
 'use client'
+import { useState } from 'react'
 import { StatCard, Card } from '@/components/ui'
 import PageHeader from '@/components/shared/PageHeader'
 import { formatINR } from '@/lib/utils'
+import { toast } from 'sonner'
 
 interface Props {
   stats: {
-    totalStudents: number
-    activeStudents: number
-    completedStudents: number
-    completionRate: number
-    totalRevenue: number
-    totalDue: number
-    totalSessions: number
-    presentSessions: number
-    totalBatches: number
-    activeBatches: number
+    totalStudents: number; activeStudents: number; completedStudents: number; completionRate: number
+    totalRevenue: number; totalDue: number; totalSessions: number; presentSessions: number
+    totalBatches: number; activeBatches: number
   }
 }
 
 export default function ReportsPage({ stats }: Props) {
-  const attendanceRate = stats.totalSessions > 0
-    ? Math.round((stats.presentSessions / stats.totalSessions) * 100)
-    : 0
+  const [exporting, setExporting] = useState(false)
+  const attendanceRate = stats.totalSessions > 0 ? Math.round((stats.presentSessions / stats.totalSessions) * 100) : 0
+
+  async function exportExcel() {
+    setExporting(true)
+    try {
+      const res = await fetch('/api/export/excel')
+      const data = await res.json()
+      // Use SheetJS-style CSV download since exceljs isn't available on edge
+      const sheets: Record<string, any[]> = {
+        Students: data.students, Batches: data.batches,
+        Attendance: data.attendance, RTO: data.rto, Fees: data.fees,
+      }
+      let csv = ''
+      for (const [name, rows] of Object.entries(sheets)) {
+        if (!rows?.length) continue
+        csv += `\n=== ${name} ===\n`
+        csv += Object.keys(rows[0]).join(',') + '\n'
+        rows.forEach(r => { csv += Object.values(r).map(v => `"${v ?? ''}"`).join(',') + '\n' })
+      }
+      const blob = new Blob([csv], { type:'text/csv' })
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url
+      a.download = `DriveIndia_Export_${new Date().toISOString().split('T')[0]}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Export downloaded — open in Excel or Google Sheets')
+    } catch {
+      toast.error('Export failed')
+    }
+    setExporting(false)
+  }
 
   return (
     <div className="p-4 md:p-6">
-      <PageHeader title="Reports" subtitle="School-wide performance overview" />
+      <PageHeader title="Reports" subtitle="School-wide performance"
+        action={
+          <button onClick={exportExcel} disabled={exporting}
+            className="border border-slate-200 text-slate-700 text-sm font-medium px-3 py-2 rounded-lg hover:bg-slate-50 transition disabled:opacity-50 flex items-center gap-1.5">
+            {exporting ? '⏳' : '↓'} Export to Excel
+          </button>
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 mb-5">
-        <StatCard label="Active students"   value={stats.activeStudents}    sub="currently training"       trend="up" />
-        <StatCard label="Completion rate"   value={`${stats.completionRate}%`} sub="students finished course" trend="up" />
-        <StatCard label="Revenue collected" value={formatINR(stats.totalRevenue)} sub={formatINR(stats.totalDue) + ' pending'} trend={stats.totalDue > 0 ? 'down' : 'up'} />
-        <StatCard label="Attendance rate"   value={`${attendanceRate}%`}    sub={`${stats.presentSessions}/${stats.totalSessions} sessions`} />
+        <StatCard label="Active students"   value={stats.activeStudents}      sub="currently training"    trend="up" />
+        <StatCard label="Completion rate"   value={`${stats.completionRate}%`} sub="finished course"       trend="up" />
+        <StatCard label="Revenue collected" value={formatINR(stats.totalRevenue)} sub={`${formatINR(stats.totalDue)} pending`} trend={stats.totalDue > 0 ? 'down' : 'up'} />
+        <StatCard label="Attendance rate"   value={`${attendanceRate}%`}      sub={`${stats.presentSessions}/${stats.totalSessions} sessions`} />
       </div>
 
       <Card>
-        <div className="divide-y divide-gray-50">
+        <div className="divide-y divide-slate-50">
           {[
-            { label: 'Total students',       value: stats.totalStudents },
-            { label: 'Active',               value: stats.activeStudents },
-            { label: 'Completed',            value: stats.completedStudents },
-            { label: 'Completion rate',      value: `${stats.completionRate}%` },
-            { label: 'Active batches',       value: stats.activeBatches },
-            { label: 'Total batches',        value: stats.totalBatches },
-            { label: 'Sessions run',         value: stats.totalSessions },
-            { label: 'Sessions attended',    value: stats.presentSessions },
-            { label: 'Attendance rate',      value: `${attendanceRate}%` },
-            { label: 'Revenue collected',    value: formatINR(stats.totalRevenue) },
-            { label: 'Outstanding fees',     value: formatINR(stats.totalDue) },
-          ].map(row => (
-            <div key={row.label} className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm text-gray-600">{row.label}</span>
-              <span className="text-sm font-semibold text-gray-900">{row.value}</span>
+            ['Total students',       stats.totalStudents],
+            ['Active',               stats.activeStudents],
+            ['Completed',            stats.completedStudents],
+            ['Completion rate',      `${stats.completionRate}%`],
+            ['Active batches',       stats.activeBatches],
+            ['Total batches',        stats.totalBatches],
+            ['Sessions run',         stats.totalSessions],
+            ['Sessions attended',    stats.presentSessions],
+            ['Attendance rate',      `${attendanceRate}%`],
+            ['Revenue collected',    formatINR(stats.totalRevenue)],
+            ['Outstanding fees',     formatINR(stats.totalDue)],
+          ].map(([label, value]) => (
+            <div key={label as string} className="flex items-center justify-between px-4 py-3">
+              <span className="text-sm text-slate-600">{label}</span>
+              <span className="text-sm font-semibold text-slate-900">{value}</span>
             </div>
           ))}
         </div>

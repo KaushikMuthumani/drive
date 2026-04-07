@@ -1,56 +1,78 @@
-import { eq, count, and } from 'drizzle-orm'
+import { eq, and } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { students, batches, sessions, fees, rto_records } from '@/db/schema'
+import { students, batches, sessions, attendance, fees, fee_payments, leads, rto_records } from '@/db/schema'
 import { getSessionWithUser } from '@/lib/auth/session'
 import Shell from '@/components/shared/Shell'
 import AdminDashboard from '@/components/admin/AdminDashboard'
-import { ensureRescheduleRequestsTable, listRescheduleRequests } from '@/lib/reschedule/requests'
-import { sql } from 'drizzle-orm'
 
 export default async function DashboardPage() {
   const { user, school } = await getSessionWithUser()
   const today = new Date().toISOString().split('T')[0]
-  await ensureRescheduleRequestsTable()
 
-  const [allStudents, allBatches, allFees, scheduledRto] = await Promise.all([
+  const [allStudents, allBatches, allFees, allLeads] = await Promise.all([
     db.select().from(students).where(eq(students.school_id, school.id)),
-    db.select().from(batches).where(eq(batches.school_id, school.id)).orderBy(batches.slot_time),
+    db.select().from(batches).where(eq(batches.school_id, school.id)),
     db.select().from(fees),
-    db.select({ count: count() }).from(rto_records).where(eq(rto_records.test_status, 'scheduled')),
+    db.select().from(leads).where(eq(leads.school_id, school.id)),
   ])
 
-  // Today's sessions across active batches
-  const activeBatchIds = allBatches.filter(b => b.status === 'active').map(b => b.id)
-  const studentIds = new Set(allStudents.map(student => student.id))
-  const allSessions = activeBatchIds.length > 0
-    ? await db.select().from(sessions).where(eq(sessions.session_date, today))
-    : []
-  const todaySessions = allSessions.filter(s => activeBatchIds.includes(s.batch_id))
+  const activeBatches  = allBatches.filter(b => b.status === 'active')
+  const batchIds       = activeBatches.map(b => b.id)
+  const studentIds     = allStudents.map(s => s.id)
+  const studentById    = Object.fromEntries(allStudents.map(s => [s.id, s]))
+  const allSessions    = batchIds.length   ? await db.select().from(sessions)   : []
+  const todaySessions  = allSessions.filter(s => batchIds.includes(s.batch_id) && s.session_date === today)
+  const sessionIds     = todaySessions.map(s => s.id)
+  const todayAtt       = sessionIds.length ? await db.select().from(attendance) : []
+  const markedToday    = todayAtt.filter(a => sessionIds.includes(a.session_id))
 
-  const activeStudents = allStudents.filter(s => s.status === 'active').length
-  const unpaidFees     = allFees.filter(f => f.payment_status === 'unpaid' && studentIds.has(f.student_id)).length
-  const recentStudents = [...allStudents]
-    .sort((a, b) => new Date(b.enrolled_at).getTime() - new Date(a.enrolled_at).getTime())
-    .slice(0, 5)
-  const rescheduleRequests = await listRescheduleRequests(
-    sql`where rr.school_id = ${school.id}::uuid and rr.status = 'pending'`
-  )
+  // Pending payment confirmations
+  const allPayments    = studentIds.length ? await db.select().from(fee_payments) : []
+  const pendingPayments = allPayments.filter(p => studentIds.includes(p.student_id) && !p.is_confirmed)
+
+  const feeMap         = Object.fromEntries(allFees.map(f => [f.student_id, f]))
+  const unpaidStudents = allStudents.filter(s => { const f = feeMap[s.id]; return f && f.payment_status !== 'paid' })
+  const unpaidAmount   = unpaidStudents.reduce((sum, s) => { const f = feeMap[s.id]; return f ? sum + (Number(f.total_amount) - Number(f.paid_amount)) : sum }, 0)
+  const recentStudents = [...allStudents].sort((a,b) => new Date(b.enrolled_at).getTime() - new Date(a.enrolled_at).getTime()).slice(0, 6)
+  const markedIds      = new Set(markedToday.map(a => a.student_id))
+  const todayStudents  = allStudents.filter(s => s.batch_id && todaySessions.some(ts => ts.batch_id === s.batch_id))
+  const followUpToday  = allLeads.filter(l => l.follow_up_at === today && l.status !== 'enrolled' && l.status !== 'lost').length
+  const allRtoRecords  = studentIds.length ? await db.select().from(rto_records) : []
+  const todayDate      = new Date(today)
+  const weekAheadDate  = new Date(todayDate)
+  weekAheadDate.setDate(weekAheadDate.getDate() + 7)
+  const rtoSoon: any[] = []
+  for (const record of allRtoRecords) {
+    if (!record.test_date) continue
+    const student = studentById[record.student_id]
+    if (!student) continue
+    const testDate = new Date(record.test_date)
+    if (testDate < todayDate || testDate > weekAheadDate) continue
+    rtoSoon.push({ ...record, studentName: student.name })
+  }
 
   return (
     <Shell role="admin" userName={user.name} schoolName={school.name}>
       <AdminDashboard
         stats={{
-          students:      activeStudents,
-          activeBatches: allBatches.filter(b => b.status === 'active').length,
-          todaySessions: todaySessions.length,
-          pendingRto:    scheduledRto[0]?.count ?? 0,
-          unpaidFees,
-          pendingReschedules: rescheduleRequests.length,
+          students:         allStudents.filter(s => s.status === 'active' || s.status === 'enrolled').length,
+          activeBatches:    activeBatches.length,
+          todaySessions:    todaySessions.length,
+          pendingRto:       rtoSoon.length,
+          unpaidFees:       unpaidStudents.length,
+          unpaidAmount,
+          attendanceToday:  markedIds.size,
+          totalToday:       todayStudents.length,
+          pendingPayments:  pendingPayments.length,
+          followUpToday,
         }}
         recentStudents={recentStudents}
-        todayBatches={allBatches.filter(b => b.status === 'active')}
+        todayBatches={activeBatches}
         todaySessions={todaySessions}
-        rescheduleRequests={rescheduleRequests.slice(0, 5)}
+        unpaidStudents={unpaidStudents}
+        pendingPayments={pendingPayments}
+        markedSessionIds={markedToday.map(a => a.session_id)}
+        rtoSoon={rtoSoon}
       />
     </Shell>
   )

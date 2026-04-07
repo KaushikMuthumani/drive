@@ -3,8 +3,6 @@ import {
   timestamp, date, decimal, jsonb, pgEnum, time
 } from 'drizzle-orm/pg-core'
 
-// ── Enums ────────────────────────────────────────────────────────────────────
-
 export const userRoleEnum       = pgEnum('user_role',       ['admin', 'instructor'])
 export const courseTypeEnum     = pgEnum('course_type',     ['2-wheeler', '4-wheeler', 'heavy'])
 export const studentStatusEnum  = pgEnum('student_status',  ['enrolled', 'active', 'completed', 'on_hold', 'dropped'])
@@ -14,8 +12,9 @@ export const attendanceEnum     = pgEnum('attendance',      ['present', 'absent'
 export const vehicleStatusEnum  = pgEnum('vehicle_status',  ['available', 'in_session', 'service_due', 'under_repair'])
 export const feeStatusEnum      = pgEnum('fee_status',      ['unpaid', 'partial', 'paid'])
 export const rtoTestStatusEnum  = pgEnum('rto_test_status', ['not_scheduled', 'scheduled', 'passed', 'failed'])
-
-// ── Core entities ─────────────────────────────────────────────────────────────
+export const leadStatusEnum     = pgEnum('lead_status',     ['new', 'called', 'interested', 'enrolled', 'lost'])
+export const leadSourceEnum     = pgEnum('lead_source',     ['walk_in', 'phone', 'whatsapp', 'referral', 'facebook', 'other'])
+export const paymentModeEnum    = pgEnum('payment_mode',    ['upi', 'cash', 'card', 'bank_transfer'])
 
 export const cities = pgTable('cities', {
   id:                 uuid('id').primaryKey().defaultRandom(),
@@ -37,24 +36,29 @@ export const schools = pgTable('schools', {
   created_at: timestamp('created_at').notNull().defaultNow(),
 })
 
+export const school_settings = pgTable('school_settings', {
+  id:         uuid('id').primaryKey().defaultRandom(),
+  school_id:  uuid('school_id').references(() => schools.id).notNull().unique(),
+  upi_id:     text('upi_id'),
+  upi_qr_url: text('upi_qr_url'),
+  updated_at: timestamp('updated_at').notNull().defaultNow(),
+})
+
 export const users = pgTable('users', {
   id:            uuid('id').primaryKey().defaultRandom(),
   school_id:     uuid('school_id').references(() => schools.id).notNull(),
   name:          text('name').notNull(),
   phone:         text('phone').notNull().unique(),
-  password_hash: text('password_hash'),   // nullable — OTP users have no password
+  password_hash: text('password_hash'),
   role:          userRoleEnum('role').notNull(),
   is_active:     boolean('is_active').notNull().default(true),
   created_at:    timestamp('created_at').notNull().defaultNow(),
 })
 
-// ── Batches ───────────────────────────────────────────────────────────────────
-
 export const batches = pgTable('batches', {
   id:             uuid('id').primaryKey().defaultRandom(),
   school_id:      uuid('school_id').references(() => schools.id).notNull(),
   instructor_id:  uuid('instructor_id').references(() => users.id).notNull(),
-  vehicle_id:     uuid('vehicle_id').references(() => vehicles.id).notNull(),
   name:           text('name').notNull(),
   slot_time:      time('slot_time').notNull(),
   day_pref:       dayPrefEnum('day_pref').notNull(),
@@ -65,8 +69,6 @@ export const batches = pgTable('batches', {
   status:         batchStatusEnum('status').notNull().default('active'),
   created_at:     timestamp('created_at').notNull().defaultNow(),
 })
-
-// ── Students ──────────────────────────────────────────────────────────────────
 
 export const students = pgTable('students', {
   id:             uuid('id').primaryKey().defaultRandom(),
@@ -82,8 +84,6 @@ export const students = pgTable('students', {
   enrolled_at:    timestamp('enrolled_at').notNull().defaultNow(),
 })
 
-// ── Vehicles ──────────────────────────────────────────────────────────────────
-
 export const vehicles = pgTable('vehicles', {
   id:               uuid('id').primaryKey().defaultRandom(),
   school_id:        uuid('school_id').references(() => schools.id).notNull(),
@@ -94,18 +94,15 @@ export const vehicles = pgTable('vehicles', {
   service_due_date: date('service_due_date'),
 })
 
-// ── Sessions ──────────────────────────────────────────────────────────────────
-
 export const sessions = pgTable('sessions', {
   id:           uuid('id').primaryKey().defaultRandom(),
   batch_id:     uuid('batch_id').references(() => batches.id).notNull(),
   session_date: date('session_date').notNull(),
   session_num:  integer('session_num').notNull(),
+  vehicle_id:   uuid('vehicle_id').references(() => vehicles.id),
   notes:        text('notes'),
   created_at:   timestamp('created_at').notNull().defaultNow(),
 })
-
-// ── Attendance ────────────────────────────────────────────────────────────────
 
 export const attendance = pgTable('attendance', {
   id:           uuid('id').primaryKey().defaultRandom(),
@@ -116,8 +113,6 @@ export const attendance = pgTable('attendance', {
   notes:        text('notes'),
   marked_at:    timestamp('marked_at').notNull().defaultNow(),
 })
-
-// ── RTO records ───────────────────────────────────────────────────────────────
 
 export const rto_records = pgTable('rto_records', {
   id:             uuid('id').primaryKey().defaultRandom(),
@@ -132,19 +127,40 @@ export const rto_records = pgTable('rto_records', {
   dl_number:      text('dl_number'),
 })
 
-// ── Fees ──────────────────────────────────────────────────────────────────────
-
 export const fees = pgTable('fees', {
-  id:                uuid('id').primaryKey().defaultRandom(),
-  student_id:        uuid('student_id').references(() => students.id).notNull().unique(),
-  total_amount:      decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
-  paid_amount:       decimal('paid_amount',  { precision: 10, scale: 2 }).notNull().default('0'),
-  payment_status:    feeStatusEnum('payment_status').notNull().default('unpaid'),
-  razorpay_order_id: text('razorpay_order_id'),
-  paid_at:           timestamp('paid_at'),
+  id:             uuid('id').primaryKey().defaultRandom(),
+  student_id:     uuid('student_id').references(() => students.id).notNull().unique(),
+  total_amount:   decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
+  paid_amount:    decimal('paid_amount',  { precision: 10, scale: 2 }).notNull().default('0'),
+  payment_status: feeStatusEnum('payment_status').notNull().default('unpaid'),
 })
 
-// ── Certificates ──────────────────────────────────────────────────────────────
+export const fee_payments = pgTable('fee_payments', {
+  id:             uuid('id').primaryKey().defaultRandom(),
+  student_id:     uuid('student_id').references(() => students.id).notNull(),
+  amount:         decimal('amount', { precision: 10, scale: 2 }).notNull(),
+  payment_mode:   paymentModeEnum('payment_mode').notNull().default('upi'),
+  receipt_number: text('receipt_number').notNull().unique(),
+  admin_note:     text('admin_note'),
+  confirmed_by:   uuid('confirmed_by').references(() => users.id),
+  is_confirmed:   boolean('is_confirmed').notNull().default(false),
+  paid_at:        timestamp('paid_at').notNull().defaultNow(),
+})
+
+export const leads = pgTable('leads', {
+  id:                   uuid('id').primaryKey().defaultRandom(),
+  school_id:            uuid('school_id').references(() => schools.id).notNull(),
+  name:                 text('name').notNull(),
+  phone:                text('phone').notNull(),
+  course_type:          courseTypeEnum('course_type').notNull().default('4-wheeler'),
+  source:               leadSourceEnum('source').notNull().default('phone'),
+  status:               leadStatusEnum('status').notNull().default('new'),
+  notes:                text('notes'),
+  follow_up_at:         date('follow_up_at'),
+  converted_student_id: uuid('converted_student_id').references(() => students.id),
+  created_at:           timestamp('created_at').notNull().defaultNow(),
+  updated_at:           timestamp('updated_at').notNull().defaultNow(),
+})
 
 export const certificates = pgTable('certificates', {
   id:                 uuid('id').primaryKey().defaultRandom(),
@@ -153,8 +169,6 @@ export const certificates = pgTable('certificates', {
   issued_date:        date('issued_date').notNull(),
   pdf_url:            text('pdf_url'),
 })
-
-// ── Notifications ─────────────────────────────────────────────────────────────
 
 export const notifications = pgTable('notifications', {
   id:         uuid('id').primaryKey().defaultRandom(),

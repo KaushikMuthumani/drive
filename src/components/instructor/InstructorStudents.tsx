@@ -20,7 +20,7 @@ export default function InstructorStudents({ students, batches, attendance }: Pr
   return (
     <div className="p-4 md:p-6">
       <PageHeader
-        title="My batches & students"
+        title="My students"
         subtitle={`${batches.length} batch${batches.length !== 1 ? 'es' : ''} · ${students.length} student${students.length !== 1 ? 's' : ''}`}
       />
 

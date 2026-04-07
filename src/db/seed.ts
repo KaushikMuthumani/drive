@@ -51,7 +51,6 @@ async function seed() {
   const [batch] = await db.insert(schema.batches).values({
     school_id:      school.id,
     instructor_id:  instructor.id,
-    vehicle_id:     vehicle.id,
     name:           '7 AM Weekday Batch – Swift',
     slot_time:      '07:00:00',
     day_pref:       'weekdays',

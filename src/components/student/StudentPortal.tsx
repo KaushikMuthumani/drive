@@ -1,27 +1,38 @@
 'use client'
 import { useState } from 'react'
 import { Badge, ProgressBar, Avatar, Card } from '@/components/ui'
-import { formatDate, formatSlotTime, getDayLabel } from '@/lib/utils'
+import { formatDate, formatSlotTime, getDayLabel, formatINR } from '@/lib/utils'
 import { toast } from 'sonner'
 
-type Tab = 'home' | 'sessions' | 'rto' | 'certificate' | 'reschedule'
+type Tab = 'home' | 'sessions' | 'fee' | 'rto'
 
 interface Props {
-  student: any; school: any; batch: any | null; instructor: any | null
+  student: any; school: any; batch: any; instructor: any
   allSessions: any[]; studentAttendance: any[]
-  rtoRecord: any | null; fee: any | null
-  rescheduleRequests: any[]
+  rtoRecord: any; fee: any; paymentHistory: any[]; upiSettings: any
 }
 
-export default function StudentPortal({ student, school, batch, instructor, allSessions, studentAttendance, rtoRecord, fee, rescheduleRequests: initialRequests }: Props) {
-  const [tab, setTab] = useState<Tab>('home')
-  const [requests, setRequests] = useState(initialRequests)
-  const [requestForm, setRequestForm] = useState({ requested_date: '', requested_time: '', reason: '' })
-  const [sending, setSending] = useState(false)
+export default function StudentPortal({
+  student, school, batch, instructor, allSessions, studentAttendance,
+  rtoRecord, fee, paymentHistory, upiSettings
+}: Props) {
+  const [tab, setTab]           = useState<Tab>('home')
+  const [payAmount, setPayAmount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [payments, setPayments] = useState(paymentHistory)
 
-  const totalSessions = batch?.total_sessions ?? 0
-  const presentSessions = studentAttendance.filter(a => a.status === 'present').length
-  const progress = totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 0
+  const today            = new Date().toISOString().split('T')[0]
+  const totalSessions    = batch?.total_sessions ?? 0
+  const presentSessions  = studentAttendance.filter(a => a.status === 'present').length
+  const progress         = totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 0
+  const totalFee         = Number(fee?.total_amount ?? 0)
+  const paidFee          = Number(fee?.paid_amount ?? 0)
+  const balanceFee       = Math.max(0, totalFee - paidFee)
+
+  // Next upcoming session
+  const nextSession = allSessions
+    .filter(s => s.session_date >= today && !studentAttendance.some(a => a.session_id === s.id))
+    .sort((a, b) => a.session_date.localeCompare(b.session_date))[0] ?? null
 
   const rtoStep = !rtoRecord ? 0
     : rtoRecord.dl_number ? 4
@@ -29,289 +40,304 @@ export default function StudentPortal({ student, school, batch, instructor, allS
     : rtoRecord.test_date ? 3
     : rtoRecord.ll_number ? 2 : 1
 
+  function getAttStatus(sessionId: string) {
+    return studentAttendance.find(a => a.session_id === sessionId)?.status
+  }
+
+  async function submitPayment() {
+    const amount = Number(payAmount)
+    if (!amount || amount <= 0 || amount > balanceFee) {
+      toast.error(`Enter amount between ₹1 and ${formatINR(balanceFee)}`); return
+    }
+    setSubmitting(true)
+    const res = await fetch('/api/fee-payments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id: student.id, amount, payment_mode: 'upi' }),
+    })
+    const data = await res.json()
+    setSubmitting(false)
+    if (!res.ok) { toast.error('Failed to submit'); return }
+    setPayments(p => [...p, data.data])
+    setPayAmount('')
+    toast.success('Payment submitted! Your school will confirm shortly.')
+  }
+
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'home', label: 'Home' },
-    { id: 'sessions', label: 'Sessions' },
-    { id: 'reschedule', label: 'Reschedule' },
-    { id: 'rto', label: 'RTO' },
-    { id: 'certificate', label: 'Certificate' },
+    { id: 'home', label: 'Home' }, { id: 'sessions', label: 'Sessions' },
+    { id: 'fee', label: 'Fee' },   { id: 'rto', label: 'RTO' },
   ]
 
-  function getAttendance(sessionId: string) {
-    return studentAttendance.find(a => a.session_id === sessionId)
-  }
-
-  const sessionTimeline = [
-    ...allSessions.map(session => ({
-      kind: 'session' as const,
-      sortDate: session.session_date ?? '9999-12-31',
-      id: session.id,
-      session,
-    })),
-    ...requests
-      .filter(request => request.status === 'approved' && request.approved_date)
-      .map(request => ({
-        kind: 'makeup' as const,
-        sortDate: request.approved_date,
-        id: `makeup-${request.id}`,
-        request,
-      })),
-  ].sort((a, b) => {
-    const dateCompare = String(a.sortDate).localeCompare(String(b.sortDate))
-    if (dateCompare !== 0) return dateCompare
-    return String(a.id).localeCompare(String(b.id))
-  })
-
-  async function submitReschedule() {
-    setSending(true)
-    const res = await fetch('/api/reschedule-requests', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        student_id: student.id,
-        portal_token: student.portal_token,
-        requested_date: requestForm.requested_date || undefined,
-        requested_time: requestForm.requested_time || undefined,
-        reason: requestForm.reason,
-      }),
-    })
-    const data = await res.json().catch(() => ({ error: 'Failed to submit request' }))
-    setSending(false)
-    if (!res.ok) {
-      toast.error(typeof data.error === 'string' ? data.error : 'Failed to submit request')
-      return
-    }
-    setRequests(prev => [data.data, ...prev])
-    setRequestForm({ requested_date: '', requested_time: '', reason: '' })
-    toast.success('Reschedule request sent')
-  }
-
   return (
-    <div className="min-h-screen bg-gray-50" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-      <div className="bg-white border-b border-gray-100 px-4 py-3 sticky top-0 z-10">
+    <div className="min-h-screen bg-slate-50" style={{ paddingTop: 'env(safe-area-inset-top,0px)' }}>
+      {/* Header */}
+      <div className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
         <div className="max-w-lg mx-auto flex items-center justify-between">
           <div>
-            <div className="text-base font-bold text-gray-900">Drive<span className="text-emerald-600">India</span></div>
-            <div className="text-xs text-gray-400 truncate max-w-[180px]">{school?.name}</div>
+            <div className="text-sm font-bold text-slate-900">Drive<span className="text-green-600">India</span></div>
+            <div className="text-xs text-slate-400 truncate max-w-[180px]">{school?.name}</div>
           </div>
           <div className="flex items-center gap-2">
             <Avatar name={student.name} size="sm" />
             <div>
-              <p className="text-sm font-medium text-gray-800 leading-tight">{student.name}</p>
-              <p className="text-xs text-gray-400">{student.course_type}</p>
+              <p className="text-sm font-medium text-slate-800 leading-tight">{student.name}</p>
+              <p className="text-xs text-slate-400">{student.course_type}</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-10">
-        <div className="max-w-lg mx-auto flex">
+      {/* Tabs */}
+      <div className="bg-white border-b border-slate-200 sticky top-[57px] z-10">
+        <div className="max-w-lg mx-auto flex overflow-x-auto">
           {tabs.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`flex-1 py-3 text-sm font-medium border-b-2 transition ${
-                tab === t.id ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-gray-500'
-              }`}
-            >
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex-shrink-0 px-5 py-3 text-sm font-medium border-b-2 transition ${tab === t.id ? 'border-green-500 text-green-600' : 'border-transparent text-slate-400'}`}>
               {t.label}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-4" style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 24px)' }}>
+      <div className="max-w-lg mx-auto px-4 py-4 pb-10">
+
+        {/* ── HOME ──────────────────────────────────────────── */}
         {tab === 'home' && (
           <div className="space-y-3">
+            {/* Next session highlight */}
+            {nextSession && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-green-600 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
+                  #{nextSession.session_num}
+                </div>
+                <div>
+                  <p className="text-xs text-green-700 font-medium">Next session</p>
+                  <p className="text-sm font-semibold text-green-900">{formatDate(nextSession.session_date)}</p>
+                  {batch && (
+                    <p className="text-xs text-green-700 mt-0.5">{formatSlotTime(batch.slot_time?.slice(0, 5))} · {getDayLabel(batch.day_pref)}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Stats */}
             <div className="grid grid-cols-3 gap-3">
-              <div className="bg-white rounded-xl p-3 border border-gray-100 text-center">
-                <p className="text-xl font-bold text-gray-900">{presentSessions}</p>
-                <p className="text-xs text-gray-400">Attended</p>
-              </div>
-              <div className="bg-white rounded-xl p-3 border border-gray-100 text-center">
-                <p className="text-xl font-bold text-gray-900">{totalSessions - presentSessions}</p>
-                <p className="text-xs text-gray-400">Remaining</p>
-              </div>
-              <div className="bg-white rounded-xl p-3 border border-gray-100 text-center">
-                <p className="text-xl font-bold text-emerald-600">{progress}%</p>
-                <p className="text-xs text-gray-400">Done</p>
-              </div>
+              {[
+                { label: 'Done', value: presentSessions, color: 'text-slate-900' },
+                { label: 'Left', value: totalSessions - presentSessions, color: 'text-slate-900' },
+                { label: 'Progress', value: `${progress}%`, color: 'text-green-600' },
+              ].map(s => (
+                <div key={s.label} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
+                  <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{s.label}</p>
+                </div>
+              ))}
             </div>
 
             <Card className="p-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Course progress</p>
-              <ProgressBar value={presentSessions} max={totalSessions} className="mb-1.5" />
-              <p className="text-xs text-gray-400">{presentSessions} of {totalSessions} sessions attended</p>
+              <p className="text-xs text-slate-400 mb-2">Course progress</p>
+              <ProgressBar value={presentSessions} max={totalSessions} />
+              <p className="text-xs text-slate-400 mt-1.5">{presentSessions} of {totalSessions} sessions attended</p>
             </Card>
 
-            {batch && (
-              <Card className="p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Your batch</p>
-                <p className="text-sm font-semibold text-gray-800">{batch.name}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {formatSlotTime(batch.slot_time?.slice(0, 5))} · {getDayLabel(batch.day_pref)}
-                </p>
-                {instructor && (
-                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-50">
-                    <Avatar name={instructor.name} size="sm" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">{instructor.name}</p>
-                      <p className="text-xs text-gray-400">Your instructor</p>
-                    </div>
-                  </div>
-                )}
+            {instructor && (
+              <Card className="p-4 flex items-center gap-3">
+                <Avatar name={instructor.name} />
+                <div>
+                  <p className="text-xs text-slate-400">Instructor</p>
+                  <p className="text-sm font-semibold text-slate-800">{instructor.name}</p>
+                </div>
               </Card>
             )}
 
             {fee && (
               <Card className="p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Fee status</p>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-700">Total: <span className="font-medium">₹{Number(fee.total_amount).toLocaleString('en-IN')}</span></p>
-                    <p className="text-xs text-gray-400">Paid: ₹{Number(fee.paid_amount).toLocaleString('en-IN')}</p>
-                  </div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-slate-400">Fee status</p>
                   <Badge variant={fee.payment_status === 'paid' ? 'green' : fee.payment_status === 'partial' ? 'amber' : 'red'}>
                     {fee.payment_status}
                   </Badge>
                 </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Paid: <span className="font-medium text-green-600">{formatINR(paidFee)}</span></span>
+                  <span className="text-slate-600">Balance: <span className="font-medium text-amber-600">{formatINR(balanceFee)}</span></span>
+                </div>
+                {balanceFee > 0 && (
+                  <button onClick={() => setTab('fee')} className="mt-2 text-xs text-green-600 font-medium hover:underline">
+                    Pay now →
+                  </button>
+                )}
               </Card>
             )}
           </div>
         )}
 
+        {/* ── SESSIONS ──────────────────────────────────────── */}
         {tab === 'sessions' && (
           <div className="space-y-2">
-            {sessionTimeline.length === 0 && <Card className="p-8 text-center text-gray-400">No sessions scheduled yet</Card>}
-            {sessionTimeline.map(item => {
-              if (item.kind === 'makeup') {
-                const request = item.request
-                return (
-                  <Card key={item.id} className="p-3.5 flex items-center gap-3 border border-emerald-100 bg-emerald-50/60">
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 bg-emerald-100 text-emerald-700">M</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800">Makeup class</p>
-                      <p className="text-xs text-gray-500">{formatDate(request.approved_date)}{request.approved_time ? ` at ${request.approved_time}` : ''}</p>
-                    </div>
-                    <Badge variant="green">Approved</Badge>
-                  </Card>
-                )
-              }
-
-              const s = item.session
-              const att = getAttendance(s.id)
-              const status = att?.status ?? 'upcoming'
+            {allSessions.length === 0 && (
+              <Card className="p-8 text-center text-slate-400">No sessions scheduled yet</Card>
+            )}
+            {allSessions.map(sess => {
+              const status = getAttStatus(sess.id)
+              const isUpcoming = sess.session_date > today
               return (
-                <Card key={s.id} className="p-3.5 flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                    status === 'present' ? 'bg-emerald-100 text-emerald-700'
-                      : status === 'absent' ? 'bg-red-100 text-red-600'
-                        : status === 'holiday' ? 'bg-amber-100 text-amber-700'
-                          : 'bg-gray-100 text-gray-400'
-                  }`}>{s.session_num}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800">Session {s.session_num}</p>
-                    <p className="text-xs text-gray-400">{formatDate(s.session_date)}</p>
+                <Card key={sess.id} className="p-3 flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
+                    status === 'present' ? 'bg-green-100 text-green-700'
+                    : status === 'absent' ? 'bg-red-100 text-red-600'
+                    : status === 'holiday' ? 'bg-amber-100 text-amber-700'
+                    : 'bg-slate-100 text-slate-400'
+                  }`}>{sess.session_num}</div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-800">Session {sess.session_num}</p>
+                    <p className="text-xs text-slate-400">{formatDate(sess.session_date)}</p>
                   </div>
-                  <Badge variant={status === 'present' ? 'green' : status === 'absent' ? 'red' : status === 'holiday' ? 'amber' : 'gray'}>
-                    {status === 'upcoming' ? 'Upcoming' : status}
-                  </Badge>
+                  {status
+                    ? <Badge variant={status === 'present' ? 'green' : status === 'absent' ? 'red' : 'amber'}>{status}</Badge>
+                    : <Badge variant={sess.session_date === today ? 'amber' : 'gray'}>{sess.session_date === today ? 'Today' : 'Upcoming'}</Badge>
+                  }
                 </Card>
               )
             })}
           </div>
         )}
 
-        {tab === 'rto' && (
-          <Card className="p-4">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">RTO progress</p>
-            {["Learner's licence (LL)", 'Training sessions', 'RTO driving test', 'Permanent licence (DL)'].map((step, i) => (
-              <div key={step} className="flex items-start gap-3 mb-4 last:mb-0">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                  rtoStep > i ? 'bg-emerald-500 text-white'
-                    : rtoStep === i ? 'bg-amber-100 text-amber-700 border-2 border-amber-400'
-                      : 'bg-gray-100 text-gray-400'
-                }`}>{rtoStep > i ? '✓' : i + 1}</div>
-                <div className="flex-1 pt-1">
-                  <p className={`text-sm font-medium ${rtoStep > i ? 'text-emerald-700' : rtoStep === i ? 'text-amber-700' : 'text-gray-400'}`}>{step}</p>
-                  {i === 0 && rtoRecord?.ll_number && <p className="text-xs text-gray-400 mt-0.5">LL: {rtoRecord.ll_number}{rtoRecord.ll_expiry_date ? ` · Expires ${formatDate(rtoRecord.ll_expiry_date)}` : ''}</p>}
-                  {i === 2 && rtoRecord?.test_date && <p className="text-xs text-gray-400 mt-0.5">Test: {formatDate(rtoRecord.test_date)}{rtoRecord.test_venue ? ` · ${rtoRecord.test_venue}` : ''}</p>}
-                  {i === 3 && rtoRecord?.dl_number && <p className="text-xs text-gray-400 mt-0.5">DL: {rtoRecord.dl_number}</p>}
-                </div>
-              </div>
-            ))}
-          </Card>
-        )}
-
-        {tab === 'reschedule' && (
+        {/* ── FEE ───────────────────────────────────────────── */}
+        {tab === 'fee' && (
           <div className="space-y-3">
-            <Card className="p-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Request a makeup class</p>
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div className="space-y-1">
-                  <label className="block text-sm font-medium text-gray-700">Preferred date</label>
-                  <input type="date" value={requestForm.requested_date} onChange={e => setRequestForm(f => ({ ...f, requested_date: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-sm font-medium text-gray-700">Preferred time</label>
-                  <input type="time" value={requestForm.requested_time} onChange={e => setRequestForm(f => ({ ...f, requested_time: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-                </div>
-              </div>
-              <div className="space-y-1 mb-3">
-                <label className="block text-sm font-medium text-gray-700">Reason</label>
-                <textarea value={requestForm.reason} onChange={e => setRequestForm(f => ({ ...f, reason: e.target.value }))} rows={3} className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none" placeholder="Why did you miss class and when can you attend?" />
-              </div>
-              <button onClick={submitReschedule} disabled={sending || requestForm.reason.trim().length < 5} className="w-full px-4 py-3 bg-emerald-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50">
-                {sending ? 'Sending...' : 'Request reschedule'}
-              </button>
-            </Card>
-
-            <Card className="p-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Your requests</p>
-              {requests.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No requests yet</p>}
-              <div className="space-y-2">
-                {requests.map((request: any) => (
-                  <div key={request.id} className="rounded-xl bg-gray-50 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-gray-800">{request.requested_date ? formatDate(request.requested_date) : 'Flexible date'}</p>
-                      <Badge variant={request.status === 'approved' ? 'green' : request.status === 'rejected' ? 'red' : 'amber'}>
-                        {request.status}
-                      </Badge>
+            {fee ? (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Total', value: formatINR(totalFee), color: 'text-slate-900' },
+                    { label: 'Paid', value: formatINR(paidFee), color: 'text-green-600' },
+                    { label: 'Balance', value: formatINR(balanceFee), color: balanceFee > 0 ? 'text-amber-600' : 'text-green-600' },
+                  ].map(s => (
+                    <div key={s.label} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
+                      <p className={`text-base font-bold ${s.color}`}>{s.value}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{s.label}</p>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">{request.requested_time || 'Flexible time'}</p>
-                    <p className="text-sm text-gray-700 mt-2">{request.reason}</p>
-                    {request.approved_date && (
-                      <p className="text-xs text-emerald-700 mt-2">Approved for {formatDate(request.approved_date)}{request.approved_time ? ` at ${request.approved_time}` : ''}</p>
+                  ))}
+                </div>
+                <ProgressBar value={paidFee} max={totalFee} />
+
+                {balanceFee > 0 && upiSettings?.upi_id && (
+                  <Card className="p-4">
+                    <p className="text-sm font-semibold text-slate-800 mb-3">Pay via UPI</p>
+                    {upiSettings.upi_qr_url && (
+                      <div className="text-center mb-3">
+                        <img src={upiSettings.upi_qr_url} alt="UPI QR"
+                          className="w-36 h-36 object-contain mx-auto border border-slate-200 rounded-xl" />
+                      </div>
                     )}
-                    {request.instructor_note && (
-                      <p className="text-xs text-gray-500 mt-2">Instructor note: {request.instructor_note}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Card>
+                    <div className="bg-slate-50 rounded-xl p-3 text-center mb-4">
+                      <p className="text-xs text-slate-400 mb-1">UPI ID</p>
+                      <p className="font-mono font-semibold text-slate-800 text-sm">{upiSettings.upi_id}</p>
+                      <button onClick={() => { navigator.clipboard.writeText(upiSettings.upi_id); toast.success('Copied!') }}
+                        className="text-xs text-green-600 hover:underline mt-1">Copy UPI ID</button>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-3">After paying on GPay / PhonePe, enter the amount below:</p>
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-slate-400 font-medium">₹</span>
+                      <input type="number" value={payAmount}
+                        onChange={e => setPayAmount(e.target.value)}
+                        placeholder={`Max ₹${balanceFee}`} max={balanceFee} min={1}
+                        className="flex-1 border border-slate-200 rounded-lg px-3 py-2.5 text-base font-semibold focus:outline-none focus:border-green-500" />
+                    </div>
+                    <div className="flex gap-2 mb-3">
+                      {[500, 1000, balanceFee]
+                        .filter((v, i, a) => a.indexOf(v) === i && v > 0)
+                        .map(v => (
+                          <button key={v} onClick={() => setPayAmount(String(v))}
+                            className={`flex-1 text-xs font-medium py-2 rounded-lg border transition ${
+                              v === balanceFee ? 'bg-green-50 text-green-700 border-green-200' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}>
+                            {v === balanceFee ? 'Pay full' : formatINR(v)}
+                          </button>
+                        ))}
+                    </div>
+                    <button onClick={submitPayment} disabled={submitting || !payAmount}
+                      className="w-full bg-green-600 text-white font-semibold py-3 rounded-xl text-sm hover:bg-green-700 transition disabled:opacity-40 flex items-center justify-center gap-2">
+                      {submitting
+                        ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Submitting…</>
+                        : "I've paid via UPI ✓"}
+                    </button>
+                    <p className="text-xs text-slate-400 text-center mt-2">Your school will confirm and receipt will appear here</p>
+                  </Card>
+                )}
+
+                {balanceFee <= 0 && (
+                  <Card className="p-6 text-center">
+                    <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3 text-xl">✓</div>
+                    <p className="font-semibold text-green-700">All fees paid!</p>
+                  </Card>
+                )}
+
+                {payments.length > 0 && (
+                  <Card>
+                    <div className="p-3 border-b border-slate-100">
+                      <p className="text-sm font-semibold text-slate-700">Payment history</p>
+                    </div>
+                    {payments.map((p: any) => (
+                      <div key={p.id} className="flex items-center gap-3 px-4 py-3 border-b border-slate-50 last:border-0">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-slate-800">{formatINR(Number(p.amount))}</p>
+                          <p className="text-xs text-slate-400">{formatDate(p.paid_at)} · {p.payment_mode}</p>
+                        </div>
+                        <Badge variant={p.is_confirmed ? 'green' : 'amber'}>
+                          {p.is_confirmed ? 'Confirmed' : 'Pending'}
+                        </Badge>
+                        {p.is_confirmed && (
+                          <a href={`/api/receipts/${p.id}`} target="_blank" rel="noreferrer"
+                            className="text-xs text-green-600 hover:underline">Receipt</a>
+                        )}
+                      </div>
+                    ))}
+                  </Card>
+                )}
+              </>
+            ) : (
+              <Card className="p-8 text-center text-slate-400">No fee record found</Card>
+            )}
           </div>
         )}
 
-        {tab === 'certificate' && (
-          presentSessions >= totalSessions && totalSessions > 0 ? (
-            <Card className="p-8 text-center">
-              <div className="w-16 h-16 rounded-full bg-emerald-100 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-4 text-2xl text-emerald-600">✓</div>
-              <p className="text-lg font-bold text-gray-900 mb-1">Course completed!</p>
-              <p className="text-sm text-gray-500 mb-1">This certifies that</p>
-              <p className="text-xl font-semibold text-gray-900 mb-1">{student.name}</p>
-              <p className="text-sm text-gray-500 mb-4">has completed the {student.course_type} driving course at<br /><strong>{school?.name}</strong></p>
-              <button className="px-6 py-3 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 transition active:scale-95">Download certificate</button>
+        {/* ── RTO ───────────────────────────────────────────── */}
+        {tab === 'rto' && (
+          <div className="space-y-3">
+            <Card className="p-4">
+              <p className="text-sm font-semibold text-slate-800 mb-4">Licence progress</p>
+              {['Learner\'s licence (LL)', 'Training sessions', 'RTO driving test', 'Permanent licence (DL)'].map((step, i) => {
+                const done = rtoStep > i
+                const now  = rtoStep === i
+                return (
+                  <div key={step} className="flex items-start gap-3 mb-4 last:mb-0">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                      done ? 'bg-green-500 text-white' : now ? 'bg-amber-100 text-amber-700 border border-amber-400' : 'bg-slate-100 text-slate-400'
+                    }`}>{done ? '✓' : i + 1}</div>
+                    <div className="flex-1 pt-0.5">
+                      <p className={`text-sm font-medium ${done ? 'text-green-700' : now ? 'text-amber-700' : 'text-slate-400'}`}>{step}</p>
+                      {i === 0 && rtoRecord?.ll_number && (
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          LL: {rtoRecord.ll_number}
+                          {rtoRecord.ll_expiry_date && ` · Expires ${rtoRecord.ll_expiry_date}`}
+                        </p>
+                      )}
+                      {i === 2 && rtoRecord?.test_date && (
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Test: {rtoRecord.test_date}
+                          {rtoRecord.test_venue && ` · ${rtoRecord.test_venue}`}
+                        </p>
+                      )}
+                      {i === 3 && rtoRecord?.dl_number && (
+                        <p className="text-xs text-slate-500 mt-0.5">DL: {rtoRecord.dl_number}</p>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </Card>
-          ) : (
-            <Card className="p-8 text-center">
-              <div className="text-4xl mb-3">🎓</div>
-              <p className="font-semibold text-gray-700 mb-1">Not available yet</p>
-              <p className="text-sm text-gray-400 mb-4">Complete all {totalSessions} sessions to get your certificate</p>
-              <ProgressBar value={presentSessions} max={totalSessions} className="mb-2" />
-              <p className="text-xs text-gray-400">{presentSessions}/{totalSessions} sessions done</p>
-            </Card>
-          )
+          </div>
         )}
       </div>
     </div>

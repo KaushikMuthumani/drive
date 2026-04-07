@@ -1,72 +1,81 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
 interface NavItem { href: string; label: string; icon: string }
-interface ShellProps {
-  role: 'admin' | 'instructor'
-  userName: string
-  schoolName: string
-  children: React.ReactNode
-}
-
-declare global {
-  interface Window {
-    __driveIndiaHistoryPatched?: boolean
-  }
-}
 
 const adminNav: NavItem[] = [
-  { href:'/admin/dashboard',   label:'Dashboard',   icon:'▦' },
-  { href:'/admin/batches',     label:'Batches',     icon:'◈' },
-  { href:'/admin/students',    label:'Students',    icon:'◉' },
-  { href:'/admin/attendance',  label:'Attendance',  icon:'✓' },
-  { href:'/admin/rto',         label:'RTO',         icon:'◫' },
-  { href:'/admin/fleet',       label:'Fleet',       icon:'◻' },
-  { href:'/admin/instructors', label:'Instructors', icon:'◎' },
-  { href:'/admin/reports',     label:'Reports',     icon:'▨' },
+  { href: '/admin/dashboard',   label: 'Dashboard',   icon: '⊞' },
+  { href: '/admin/batches',     label: 'Batches',     icon: '◫' },
+  { href: '/admin/attendance',  label: 'Attendance',  icon: '✓' },
+  { href: '/admin/students',    label: 'Students',    icon: '◉' },
+  { href: '/admin/rto',         label: 'RTO',         icon: '⊡' },
+  { href: '/admin/enquiries',   label: 'Enquiries',   icon: '◷' },
+  { href: '/admin/fleet',       label: 'Fleet',       icon: '◈' },
+  { href: '/admin/instructors', label: 'Instructors', icon: '◎' },
+  { href: '/admin/reports',     label: 'Reports',     icon: '▤' },
+  { href: '/admin/bot',         label: 'Telegram bot', icon: '◈' },
 ]
 const instructorNav: NavItem[] = [
-  { href:'/instructor/attendance', label:'Attendance', icon:'✓' },
-  { href:'/instructor/batches',  label:'Batches',    icon:'◈' },
-  { href:'/instructor/students', label:'Students',   icon:'◉' },
-  { href:'/instructor/progress', label:'Progress',   icon:'◫' },
+  { href: '/instructor/today',    label: 'Today',    icon: '✓' },
+  { href: '/instructor/batches',  label: 'Batches',  icon: '◫' },
+  { href: '/instructor/students', label: 'Students', icon: '◉' },
+  { href: '/instructor/progress', label: 'Progress', icon: '◈' },
 ]
 
-// Bottom tab: first 4 items + More
-const adminBottomNav       = adminNav.slice(0, 4)
-const instructorBottomNav  = instructorNav.slice(0, 4)
+function ProfilePopover({ name, role, onClose }: { name: string; role: string; onClose: () => void }) {
+  const router = useRouter()
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.replace('/auth/login')
+  }
+  const profileHref = role === 'admin' ? '/admin/profile' : '/instructor/profile'
+  return (
+    <div ref={ref} className="absolute bottom-full left-0 mb-2 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 w-48 z-50">
+      <Link href={profileHref} onClick={onClose}
+        className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition">
+        <span className="text-xs opacity-60">⊙</span> Edit profile
+      </Link>
+      <div className="my-1 border-t border-slate-100" />
+      <button onClick={logout}
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition">
+        <span className="text-xs opacity-60">↗</span> Sign out
+      </button>
+    </div>
+  )
+}
 
 function MoreMenu({ nav, pathname }: { nav: NavItem[]; pathname: string }) {
-  const [open, setOpen]   = useState(false)
-  const ref               = useRef<HTMLDivElement>(null)
-  const activeInMore      = nav.some(item => pathname.startsWith(item.href))
-
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
   }, [])
-
   return (
     <div ref={ref} className="flex-1 relative">
       <button onClick={() => setOpen(o => !o)}
-        className={cn('w-full flex flex-col items-center justify-center py-2.5 gap-0.5 transition-colors',
-          activeInMore || open ? 'text-emerald-600' : 'text-gray-400')}>
+        className={cn('w-full flex flex-col items-center justify-center py-3 gap-0.5',
+          nav.some(n => pathname.startsWith(n.href)) || open ? 'text-green-600' : 'text-slate-400')}>
         <span className="text-base leading-none font-bold">···</span>
-        <span className="text-xs font-medium">More</span>
+        <span className="text-[10px] font-medium">More</span>
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 min-w-[160px] z-50">
+        <div className="absolute bottom-full right-0 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 min-w-[160px] z-50">
           {nav.map(item => (
             <Link key={item.href} href={item.href} onClick={() => setOpen(false)}
-              className={cn('flex items-center gap-3 px-4 py-3 text-sm transition-colors',
-                pathname.startsWith(item.href) ? 'text-emerald-700 font-medium bg-emerald-50' : 'text-gray-600 hover:bg-gray-50')}>
-              <span className="text-sm">{item.icon}</span>
-              {item.label}
+              className={cn('flex items-center gap-2.5 px-4 py-2.5 text-sm transition',
+                pathname.startsWith(item.href) ? 'text-green-700 font-medium bg-green-50' : 'text-slate-600 hover:bg-slate-50')}>
+              <span className="text-xs w-4 text-center opacity-60">{item.icon}</span>{item.label}
             </Link>
           ))}
         </div>
@@ -75,117 +84,87 @@ function MoreMenu({ nav, pathname }: { nav: NavItem[]; pathname: string }) {
   )
 }
 
-export default function Shell({ role, userName, schoolName, children }: ShellProps) {
-  const [pathname, setPathname] = useState('/')
-  const nav        = role === 'admin' ? adminNav : instructorNav
-  const bottomNav  = role === 'admin' ? adminBottomNav : instructorBottomNav
-  const moreNav    = role === 'admin' ? adminNav.slice(4) : instructorNav.slice(4)
-  const initials   = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const updatePathname = () => setPathname(window.location.pathname || '/')
-    updatePathname()
-
-    if (!window.__driveIndiaHistoryPatched) {
-      window.__driveIndiaHistoryPatched = true
-      const originalPushState = window.history.pushState
-      const originalReplaceState = window.history.replaceState
-
-      window.history.pushState = function (...args) {
-        const result = originalPushState.apply(this, args)
-        window.dispatchEvent(new Event('driveindia:navigate'))
-        return result
-      }
-
-      window.history.replaceState = function (...args) {
-        const result = originalReplaceState.apply(this, args)
-        window.dispatchEvent(new Event('driveindia:navigate'))
-        return result
-      }
-    }
-
-    window.addEventListener('popstate', updatePathname)
-    window.addEventListener('driveindia:navigate', updatePathname)
-
-    return () => {
-      window.removeEventListener('popstate', updatePathname)
-      window.removeEventListener('driveindia:navigate', updatePathname)
-    }
-  }, [])
+export default function Shell({ role, userName, schoolName, children }: {
+  role: 'admin' | 'instructor'; userName: string; schoolName: string; children: React.ReactNode
+}) {
+  const pathname = usePathname()
+  const [showProfile, setShowProfile] = useState(false)
+  const nav       = role === 'admin' ? adminNav : instructorNav
+  const bottomNav = nav.slice(0, 4)
+  const moreNav   = nav.slice(4)
+  const initials  = userName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-slate-50">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-56 bg-white border-r border-gray-100 flex-col flex-shrink-0">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <div className="text-base font-bold text-gray-900">Drive<span className="text-emerald-600">India</span></div>
-          <div className="text-xs text-gray-400 mt-0.5 truncate">{schoolName}</div>
+      <aside className="hidden md:flex w-52 bg-white border-r border-slate-200 flex-col flex-shrink-0">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <div className="text-base font-bold text-slate-900">Drive<span className="text-green-600">India</span></div>
+          <div className="text-xs text-slate-400 mt-0.5 truncate">{schoolName}</div>
         </div>
-        <nav className="flex-1 py-3 overflow-y-auto">
-          {nav.map(item => (
-            <Link key={item.href} href={item.href}
-              className={cn('flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors border-l-2',
-                pathname.startsWith(item.href)
-                  ? 'text-emerald-700 font-medium bg-emerald-50 border-emerald-500'
-                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800 border-transparent')}>
-              <span className="text-xs w-4 text-center">{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
+        <nav className="flex-1 py-2 overflow-y-auto">
+          {nav.map(item => {
+            const active = pathname.startsWith(item.href)
+            return (
+              <Link key={item.href} href={item.href}
+                className={cn('flex items-center gap-2.5 px-4 py-2.5 text-sm transition mx-2 rounded-lg my-0.5',
+                  active ? 'bg-green-50 text-green-700 font-medium' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800')}>
+                <span className={cn('text-xs w-4 text-center', active ? '' : 'opacity-50')}>{item.icon}</span>
+                {item.label}
+              </Link>
+            )
+          })}
         </nav>
-        <div className="px-4 py-3 border-t border-gray-100">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold flex-shrink-0">{initials}</div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-gray-800 truncate">{userName}</div>
-              <div className="text-xs text-gray-400 capitalize">{role}</div>
+        {/* Profile area — bottom of sidebar */}
+        <div className="px-3 py-3 border-t border-slate-100 relative">
+          <button onClick={() => setShowProfile(s => !s)}
+            className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 transition">
+            <div className="w-7 h-7 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+              {initials}
             </div>
-            <form action="/api/auth/logout" method="POST">
-              <button type="submit" className="text-xs text-gray-400 hover:text-gray-600 transition">Out</button>
-            </form>
-          </div>
-          {role === 'admin' && (
-            <Link href="/admin/profile" className="mt-3 block text-xs text-emerald-600 hover:underline">
-              Profile
-            </Link>
-          )}
+            <div className="flex-1 min-w-0 text-left">
+              <div className="text-xs font-medium text-slate-700 truncate">{userName}</div>
+              <div className="text-xs text-slate-400 capitalize">{role}</div>
+            </div>
+            <span className="text-slate-300 text-xs">⋯</span>
+          </button>
+          {showProfile && <ProfilePopover name={userName} role={role} onClose={() => setShowProfile(false)} />}
         </div>
       </aside>
 
+      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile header */}
-        <header className="md:hidden bg-white border-b border-gray-100 px-4 flex items-center justify-between flex-shrink-0"
-          style={{ paddingTop:'max(env(safe-area-inset-top, 0px), 12px)', paddingBottom:'12px' }}>
+        <header className="md:hidden bg-white border-b border-slate-200 px-4 flex items-center justify-between flex-shrink-0"
+          style={{ paddingTop: 'max(env(safe-area-inset-top,0px),12px)', paddingBottom: '12px' }}>
           <div>
-            <div className="text-base font-bold text-gray-900">Drive<span className="text-emerald-600">India</span></div>
-            <div className="text-xs text-gray-400 truncate max-w-[180px]">{schoolName}</div>
+            <div className="text-base font-bold text-slate-900">Drive<span className="text-green-600">India</span></div>
+            <div className="text-xs text-slate-400 truncate max-w-[160px]">{schoolName}</div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold">{initials}</div>
-            <form action="/api/auth/logout" method="POST">
-              <button type="submit" className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1">Sign out</button>
-            </form>
+          <div className="relative">
+            <button onClick={() => setShowProfile(s => !s)}
+              className="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-bold">
+              {initials}
+            </button>
+            {showProfile && <div className="absolute right-0 top-full mt-1">
+              <ProfilePopover name={userName} role={role} onClose={() => setShowProfile(false)} />
+            </div>}
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto pb-24 md:pb-0">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto pb-24 md:pb-0">{children}</main>
 
-        {/* Mobile bottom tab bar */}
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex z-40"
-          style={{ paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
+        {/* Mobile bottom nav */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex z-40"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
           {bottomNav.map(item => {
             const active = pathname.startsWith(item.href)
             return (
               <Link key={item.href} href={item.href}
                 className={cn('flex-1 flex flex-col items-center justify-center py-2.5 gap-0.5 transition-colors',
-                  active ? 'text-emerald-600' : 'text-gray-400')}>
+                  active ? 'text-green-600' : 'text-slate-400')}>
                 <span className="text-base leading-none">{item.icon}</span>
-                <span className="text-xs font-medium">{item.label}</span>
+                <span className="text-[10px] font-medium">{item.label}</span>
               </Link>
             )
           })}
