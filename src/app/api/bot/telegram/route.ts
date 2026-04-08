@@ -7,7 +7,7 @@ import { executeAction, BotAction } from '@/lib/bot/actions'
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? ''
 const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME ?? 'DriveIndiaBot'
-const GROK_API_KEY = process.env.GROK_API_KEY ?? ''
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY ?? ''
 
 // ── Telegram API helpers ───────────────────────────────────────────────────
 async function sendMessage(chatId: number | string, text: string, extra?: object) {
@@ -31,7 +31,7 @@ async function sendTyping(chatId: number | string) {
 // ── In-memory pending actions (per chat) ──────────────────────────────────
 const pendingActions = new Map<string, { action: BotAction; description: string }>()
 
-// ── Grok system prompt ───────────────────────────────────────────────────
+// ── DeepSeek system prompt ────────────────────────────────────────────────
 function buildSystemPrompt(context: any): string {
   return `You are a helpful assistant for a driving school management system called DriveIndia.
 The admin is messaging you via Telegram. Today is ${context.today}.
@@ -124,9 +124,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  if (!GROK_API_KEY) {
+  if (!DEEPSEEK_API_KEY) {
     await sendMessage(chatId,
-      '⚠️ AI unavailable until you set the GROK_API_KEY environment variable with your xAI Grok key.')
+      '⚠️ AI unavailable until you set the DEEPSEEK_API_KEY environment variable with your DeepSeek API key.')
     return NextResponse.json({ ok: true })
   }
 
@@ -152,19 +152,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Show typing and call Grok ─────────────────────────────────────────────
+  // ── Show typing and call DeepSeek ─────────────────────────────────────────
   await sendTyping(chatId)
   const context = await buildSchoolContext(schoolId)
   const systemPrompt = buildSystemPrompt(context)
 
-  const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
+  const deepseekRes = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GROK_API_KEY}`,
+      'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
     },
     body: JSON.stringify({
-      model:      'grok-4.20-reasoning',
+      model:      'deepseek-chat',
       max_tokens: 1024,
       messages:   [
         { role: 'system', content: systemPrompt },
@@ -173,15 +173,15 @@ export async function POST(req: NextRequest) {
     }),
   })
 
-  if (!grokRes.ok) {
-    const errBody = await grokRes.text().catch(() => '')
-    console.error('Grok API error:', grokRes.status, errBody)
+  if (!deepseekRes.ok) {
+    const errBody = await deepseekRes.text().catch(() => '')
+    console.error('DeepSeek API error:', deepseekRes.status, errBody)
     await sendMessage(chatId, '⚠️ AI unavailable. Try again in a moment.')
     return NextResponse.json({ ok: true })
   }
 
-  const grokData = await grokRes.json()
-  const reply = grokData.choices?.[0]?.message?.content ?? ''
+  const deepseekData = await deepseekRes.json()
+  const reply = deepseekData.choices?.[0]?.message?.content ?? ''
 
   // Try to parse as action
   const actionMatch = reply.match(/\{"action"[\s\S]*?\}/)
