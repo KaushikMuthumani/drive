@@ -7,7 +7,7 @@ import { executeAction, BotAction } from '@/lib/bot/actions'
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? ''
 const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME ?? 'DriveIndiaBot'
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? ''
+const GROK_API_KEY = process.env.GROK_API_KEY ?? ''
 
 // ── Telegram API helpers ───────────────────────────────────────────────────
 async function sendMessage(chatId: number | string, text: string, extra?: object) {
@@ -124,9 +124,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  if (!ANTHROPIC_API_KEY) {
+  if (!GROK_API_KEY) {
     await sendMessage(chatId,
-      '⚠️ AI unavailable until you set the ANTHROPIC_API_KEY environment variable with your Claude API key.')
+      '⚠️ AI unavailable until you set the GROK_API_KEY environment variable with your xAI Grok key.')
     return NextResponse.json({ ok: true })
   }
 
@@ -157,28 +157,29 @@ export async function POST(req: NextRequest) {
   const context = await buildSchoolContext(schoolId)
   const systemPrompt = buildSystemPrompt(context)
 
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+  const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'anthropic-version': '2023-06-01',
-      'Authorization': `Bearer ${ANTHROPIC_API_KEY}`,
+      'Authorization': `Bearer ${GROK_API_KEY}`,
     },
     body: JSON.stringify({
-      model:      'claude-sonnet-4-20250514',
+      model:      'grok-4.20-reasoning',
       max_tokens: 1024,
-      system:     systemPrompt,
-      messages:   [{ role: 'user', content: text }],
+      messages:   [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
+      ],
     }),
   })
 
-  if (!claudeRes.ok) {
+  if (!grokRes.ok) {
     await sendMessage(chatId, '⚠️ AI unavailable. Try again in a moment.')
     return NextResponse.json({ ok: true })
   }
 
-  const claudeData = await claudeRes.json()
-  const reply = claudeData.content?.[0]?.text ?? ''
+  const grokData = await grokRes.json()
+  const reply = grokData.choices?.[0]?.message?.content ?? ''
 
   // Try to parse as action
   const actionMatch = reply.match(/\{"action"[\s\S]*?\}/)
