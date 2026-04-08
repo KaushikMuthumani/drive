@@ -176,7 +176,7 @@ export async function POST(req: NextRequest) {
   if (!deepseekRes.ok) {
     const errBody = await deepseekRes.text().catch(() => '')
     console.error('DeepSeek API error:', deepseekRes.status, errBody)
-    await sendMessage(chatId, '⚠️ AI unavailable. Try again in a moment.')
+    await sendMessage(chatId, '⚠️ AI unavailable. Try again in a later.')
     return NextResponse.json({ ok: true })
   }
 
