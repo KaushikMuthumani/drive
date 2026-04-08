@@ -45,6 +45,12 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return
   if (url.origin !== location.origin) return
 
+  // Navigation requests should hit the network directly (we still allow offline fallback)
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => offlinePage()))
+    return
+  }
+
   // API routes — network first, fall back to cache
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(networkFirst(request, API_CACHE, 3000))

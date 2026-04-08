@@ -5,16 +5,15 @@ export default function PwaProvider({ children }: { children: React.ReactNode })
   const [installPrompt, setInstallPrompt] = useState<any>(null)
   const [showBanner, setShowBanner] = useState(false)
   const [isInstalled, setIsInstalled] = useState(false)
+  const isProd = process.env.NODE_ENV === 'production'
 
   useEffect(() => {
     let updateTimer: ReturnType<typeof setInterval> | null = null
-    // Register service worker
-    if ('serviceWorker' in navigator) {
+    if (isProd && 'serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('/sw.js', { scope: '/' })
         .then(reg => {
           console.log('[PWA] Service worker registered:', reg.scope)
-          // Check for updates every 60 seconds
           updateTimer = setInterval(() => {
             reg.update().catch(err => console.warn('[PWA] SW update skipped:', err))
           }, 60_000)
@@ -52,7 +51,7 @@ export default function PwaProvider({ children }: { children: React.ReactNode })
       if (updateTimer) clearInterval(updateTimer)
       window.removeEventListener('beforeinstallprompt', handler)
     }
-  }, [])
+  }, [isProd])
 
   async function install() {
     if (!installPrompt) return
