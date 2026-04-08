@@ -28,9 +28,6 @@ async function sendTyping(chatId: number | string) {
   })
 }
 
-// ── In-memory pending actions (per chat) ──────────────────────────────────
-const pendingActions = new Map<string, { action: BotAction; description: string }>()
-
 // ── OpenRouter system prompt ───────────────────────────────────────────────
 function buildSystemPrompt(context: any): string {
   return `You are a helpful assistant for a driving school management system called DriveIndia.
@@ -130,28 +127,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  // ── Handle YES/CONFIRM for pending actions ────────────────────────────────
-  const norm = text.toLowerCase()
-  if (norm === 'yes' || norm === 'y' || norm === 'confirm') {
-    const pending = pendingActions.get(chatId)
-    if (pending) {
-      pendingActions.delete(chatId)
-      await sendTyping(chatId)
-      const result = await executeAction(pending.action, schoolId)
-      await sendMessage(chatId, result)
-      return NextResponse.json({ ok: true })
-    }
-  }
-
-  // ── Cancel pending action ─────────────────────────────────────────────────
-  if (norm === 'no' || norm === 'cancel') {
-    if (pendingActions.has(chatId)) {
-      pendingActions.delete(chatId)
-      await sendMessage(chatId, '↩️ Action cancelled.')
-      return NextResponse.json({ ok: true })
-    }
-  }
-
   // ── Show typing and call OpenRouter ──────────────────────────────────────
   await sendTyping(chatId)
   const context = await buildSchoolContext(schoolId)
@@ -190,9 +165,8 @@ export async function POST(req: NextRequest) {
       const parsed = JSON.parse(actionMatch[0])
       if (parsed.action && parsed.payload) {
         const action: BotAction = { type: parsed.action, payload: parsed.payload }
-        const desc = buildActionDescription(action)
-        pendingActions.set(chatId, { action, description: desc })
-        await sendMessage(chatId, `${desc}\n\nReply <b>YES</b> to confirm or <b>NO</b> to cancel.`)
+        const result = await executeAction(action, schoolId)
+        await sendMessage(chatId, result)
         return NextResponse.json({ ok: true })
       }
     } catch {}
@@ -207,28 +181,6 @@ async function getSchoolIdForChat(chatId: string): Promise<string | null> {
   const allSettings = await db.select().from(school_settings)
     .where(eq(school_settings.telegram_chat_id as any, chatId))
   return allSettings[0]?.school_id ?? null
-}
-
-function buildActionDescription(action: BotAction): string {
-  const p = action.payload
-  switch (action.type) {
-    case 'UPDATE_RTO': {
-      const parts = [`Student: ${p.student_name}`]
-      if (p.test_date)  parts.push(`Test date: ${p.test_date}`)
-      if (p.test_venue) parts.push(`Venue: ${p.test_venue}`)
-      if (p.ll_number)  parts.push(`LL: ${p.ll_number}`)
-      if (p.dl_number)  parts.push(`DL: ${p.dl_number}`)
-      return `🗓 <b>Update RTO?</b>\n${parts.join('\n')}`
-    }
-    case 'RECORD_PAYMENT':
-      return `💰 <b>Record payment?</b>\nStudent: ${p.student_name}\nAmount: ₹${p.amount}\nMode: ${p.payment_mode}`
-    case 'ADD_LEAD':
-      return `👤 <b>Add lead?</b>\nName: ${p.name}\nPhone: ${p.phone}\nCourse: ${p.course_type}`
-    case 'UPDATE_LEAD_STATUS':
-      return `📋 <b>Update lead status?</b>\nPhone: ${p.phone}\nStatus: ${p.status}`
-    default:
-      return `Action: ${JSON.stringify(p)}`
-  }
 }
 
 // ── GET: register webhook with Telegram ────────────────────────────────────
