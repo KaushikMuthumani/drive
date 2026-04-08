@@ -7,6 +7,7 @@ import { executeAction, BotAction } from '@/lib/bot/actions'
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? ''
 const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME ?? 'DriveIndiaBot'
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? ''
 
 // ── Telegram API helpers ───────────────────────────────────────────────────
 async function sendMessage(chatId: number | string, text: string, extra?: object) {
@@ -123,6 +124,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  if (!ANTHROPIC_API_KEY) {
+    await sendMessage(chatId,
+      '⚠️ AI unavailable until you set the ANTHROPIC_API_KEY environment variable with your Claude API key.')
+    return NextResponse.json({ ok: true })
+  }
+
   // ── Handle YES/CONFIRM for pending actions ────────────────────────────────
   const norm = text.toLowerCase()
   if (norm === 'yes' || norm === 'y' || norm === 'confirm') {
@@ -152,7 +159,11 @@ export async function POST(req: NextRequest) {
 
   const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${ANTHROPIC_API_KEY}`,
+    },
     body: JSON.stringify({
       model:      'claude-sonnet-4-20250514',
       max_tokens: 1024,

@@ -20,6 +20,7 @@ npm install
 ```bash
 cp .env.example .env
 # Edit .env and set DATABASE_URL to your Supabase URI
+# Add `ANTHROPIC_API_KEY` with your Claude API key if you want the Telegram bot AI features to work.
 ```
 
 ### 4. Run database migrations
@@ -60,6 +61,7 @@ Set these in Vercel dashboard (Settings → Environment Variables):
 | `JWT_SECRET` | Run: `openssl rand -base64 32` |
 | `NEXT_PUBLIC_APP_URL` | Your Vercel URL e.g. https://driveindia.vercel.app |
 | `NODE_ENV` | production |
+| `ANTHROPIC_API_KEY` | Your Claude (Anthropic) API key |
 
 ---
 
