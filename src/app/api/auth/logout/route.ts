@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
     : undefined
   const origin = envAppUrl ?? req.nextUrl.origin
   const res = NextResponse.redirect(new URL('/auth/login', origin))
-  res.cookies.delete('token', { path: '/' })
-  res.cookies.delete('refresh_token', { path: '/api/auth/refresh' })
+  res.cookies.delete({ name: 'token', path: '/' })
+  res.cookies.delete({ name: 'refresh_token', path: '/api/auth/refresh' })
   return res
 }

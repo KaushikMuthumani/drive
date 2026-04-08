@@ -37,11 +37,13 @@ export const schools = pgTable('schools', {
 })
 
 export const school_settings = pgTable('school_settings', {
-  id:         uuid('id').primaryKey().defaultRandom(),
-  school_id:  uuid('school_id').references(() => schools.id).notNull().unique(),
-  upi_id:     text('upi_id'),
-  upi_qr_url: text('upi_qr_url'),
-  updated_at: timestamp('updated_at').notNull().defaultNow(),
+  id:                   uuid('id').primaryKey().defaultRandom(),
+  school_id:            uuid('school_id').references(() => schools.id).notNull().unique(),
+  upi_id:               text('upi_id'),
+  upi_qr_url:           text('upi_qr_url'),
+  telegram_chat_id:     text('telegram_chat_id'),      // Telegram user ID once linked
+  telegram_verify_code: text('telegram_verify_code'),  // Temporary 6-digit pairing code
+  updated_at:           timestamp('updated_at').notNull().defaultNow(),
 })
 
 export const users = pgTable('users', {

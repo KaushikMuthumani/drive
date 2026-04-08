@@ -1,22 +1,22 @@
 'use client'
-'use client'
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
 interface NavItem { href: string; label: string; icon: string }
 
 const adminNav: NavItem[] = [
-  { href: '/admin/dashboard',   label: 'Dashboard',   icon: '⊞' },
-  { href: '/admin/batches',     label: 'Batches',     icon: '◫' },
-  { href: '/admin/attendance',  label: 'Attendance',  icon: '✓' },
-  { href: '/admin/students',    label: 'Students',    icon: '◉' },
-  { href: '/admin/rto',         label: 'RTO',         icon: '⊡' },
-  { href: '/admin/enquiries',   label: 'Enquiries',   icon: '◷' },
-  { href: '/admin/fleet',       label: 'Fleet',       icon: '◈' },
-  { href: '/admin/instructors', label: 'Instructors', icon: '◎' },
-  { href: '/admin/reports',     label: 'Reports',     icon: '▤' },
-  { href: '/admin/bot',         label: 'Telegram bot', icon: '◈' },
+  { href: '/admin/dashboard',   label: 'Dashboard',    icon: '⊞' },
+  { href: '/admin/batches',     label: 'Batches',      icon: '◫' },
+  { href: '/admin/attendance',  label: 'Attendance',   icon: '✓' },
+  { href: '/admin/students',    label: 'Students',     icon: '◉' },
+  { href: '/admin/rto',         label: 'RTO',          icon: '⊡' },
+  { href: '/admin/enquiries',   label: 'Enquiries',    icon: '◷' },
+  { href: '/admin/fleet',       label: 'Fleet',        icon: '◈' },
+  { href: '/admin/instructors', label: 'Instructors',  icon: '◎' },
+  { href: '/admin/reports',     label: 'Reports',      icon: '▤' },
+  { href: '/admin/bot',         label: 'Telegram bot', icon: '✦' },
 ]
 const instructorNav: NavItem[] = [
   { href: '/instructor/today',    label: 'Today',    icon: '✓' },
@@ -25,28 +25,40 @@ const instructorNav: NavItem[] = [
   { href: '/instructor/progress', label: 'Progress', icon: '◈' },
 ]
 
-function ProfilePopover({ name, role, onClose }: { name: string; role: string; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
+function ProfileActions({ role, onClose, className }: {
+  role: 'admin' | 'instructor'
+  onClose: () => void
+  className?: string
+}) {
+  const router = useRouter()
+
   async function logout() {
+    onClose()
     await fetch('/api/auth/logout', { method: 'POST' })
     window.location.href = '/auth/login'
   }
-  const profileHref = role === 'admin' ? '/admin/profile' : '/instructor/profile'
+
+  function goToProfile() {
+    onClose()
+    const href = role === 'admin' ? '/admin/profile' : '/instructor/profile'
+    router.push(href)
+  }
+
   return (
-    <div ref={ref} className="absolute bottom-full left-0 mb-2 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 w-48 z-50">
-      <Link href={profileHref} onClick={() => onClose()}
-        className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition">
-        <span className="text-xs opacity-60">⊙</span> Edit profile
-      </Link>
-      <div className="my-1 border-t border-slate-100" />
-      <button onClick={logout}
-        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition">
-        <span className="text-xs opacity-60">↗</span> Sign out
+    <div className={cn('space-y-1 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm', className)}>
+      <button
+        onClick={goToProfile}
+        className="w-full flex items-center gap-2 text-sm text-slate-700 hover:text-slate-900 transition text-left"
+      >
+        <span className="text-xs opacity-60">⊙</span>
+        Edit profile
+      </button>
+      <button
+        onClick={logout}
+        className="w-full flex items-center gap-2 text-sm text-red-600 hover:text-red-500 transition text-left"
+      >
+        <span className="text-xs opacity-60">↗</span>
+        Sign out
       </button>
     </div>
   )
@@ -69,7 +81,7 @@ function MoreMenu({ nav, pathname }: { nav: NavItem[]; pathname: string }) {
         <span className="text-[10px] font-medium">More</span>
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 min-w-[160px] z-50">
+        <div className="absolute bottom-full right-0 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 min-w-[160px] z-[100]">
           {nav.map(item => (
             <Link key={item.href} href={item.href} onClick={() => setOpen(false)}
               className={cn('flex items-center gap-2.5 px-4 py-2.5 text-sm transition',
@@ -87,30 +99,23 @@ export default function Shell({ role, userName, schoolName, children }: {
   role: 'admin' | 'instructor'; userName: string; schoolName: string; children: React.ReactNode
 }) {
   const [showProfile, setShowProfile] = useState(false)
-  const [pathname, setPathname] = useState('/')
+  const [pathname, setPathname]       = useState('/')
+
   useEffect(() => {
     const set = () => setPathname(window.location.pathname)
     set()
-    const onPop = () => set()
-    window.addEventListener('popstate', onPop)
-    const pushState = window.history.pushState
-    const replaceState = window.history.replaceState
-    window.history.pushState = function (...args) {
-      const result = pushState.apply(this, args)
-      set()
-      return result
-    }
-    window.history.replaceState = function (...args) {
-      const result = replaceState.apply(this, args)
-      set()
-      return result
-    }
+    window.addEventListener('popstate', set)
+    const origPush    = window.history.pushState
+    const origReplace = window.history.replaceState
+    window.history.pushState    = function (...a) { const r = origPush.apply(this, a);    set(); return r }
+    window.history.replaceState = function (...a) { const r = origReplace.apply(this, a); set(); return r }
     return () => {
-      window.removeEventListener('popstate', onPop)
-      window.history.pushState = pushState
-      window.history.replaceState = replaceState
+      window.removeEventListener('popstate', set)
+      window.history.pushState    = origPush
+      window.history.replaceState = origReplace
     }
   }, [])
+
   const nav       = role === 'admin' ? adminNav : instructorNav
   const bottomNav = nav.slice(0, 4)
   const moreNav   = nav.slice(4)
@@ -137,10 +142,12 @@ export default function Shell({ role, userName, schoolName, children }: {
             )
           })}
         </nav>
-        {/* Profile area — bottom of sidebar */}
+        {/* Profile — sidebar bottom */}
         <div className="px-3 py-3 border-t border-slate-100 relative">
-          <button onClick={() => setShowProfile(s => !s)}
-            className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 transition">
+          <button
+            onClick={() => setShowProfile(s => !s)}
+            className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 transition"
+          >
             <div className="w-7 h-7 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
               {initials}
             </div>
@@ -150,11 +157,15 @@ export default function Shell({ role, userName, schoolName, children }: {
             </div>
             <span className="text-slate-300 text-xs">⋯</span>
           </button>
-          {showProfile && <ProfilePopover name={userName} role={role} onClose={() => setShowProfile(false)} />}
+          {showProfile && (
+            <div className="mt-3 px-1">
+              <ProfileActions role={role} onClose={() => setShowProfile(false)} />
+            </div>
+          )}
         </div>
       </aside>
 
-      {/* Main */}
+      {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile header */}
         <header className="md:hidden bg-white border-b border-slate-200 px-4 flex items-center justify-between flex-shrink-0"
@@ -164,21 +175,25 @@ export default function Shell({ role, userName, schoolName, children }: {
             <div className="text-xs text-slate-400 truncate max-w-[160px]">{schoolName}</div>
           </div>
           <div className="relative">
-            <button onClick={() => setShowProfile(s => !s)}
-              className="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-bold">
+            <button
+              onClick={() => setShowProfile(s => !s)}
+              className="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-xs font-bold"
+            >
               {initials}
             </button>
-            {showProfile && <div className="absolute right-0 top-full mt-1">
-              <ProfilePopover name={userName} role={role} onClose={() => setShowProfile(false)} />
-            </div>}
           </div>
         </header>
+        {showProfile && (
+          <div className="md:hidden border-b border-slate-200 px-4 pb-4">
+            <ProfileActions role={role} onClose={() => setShowProfile(false)} />
+          </div>
+        )}
 
         <main className="flex-1 overflow-y-auto pb-24 md:pb-0">{children}</main>
 
         {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex z-40"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex z-40"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom,0px)' }}>
           {bottomNav.map(item => {
             const active = pathname.startsWith(item.href)
             return (

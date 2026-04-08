@@ -1,24 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
-import { users } from '@/db/schema'
+import { school_settings } from '@/db/schema'
 import { buildSchoolContext } from '@/lib/bot/context'
 import { executeAction, BotAction } from '@/lib/bot/actions'
 
-// ─── Telegram helpers ──────────────────────────────────────────────────────
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? ''
+const BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME ?? 'DriveIndiaBot'
 
-async function sendMessage(chatId: number | string, text: string, replyToMessageId?: number) {
+// ── Telegram API helpers ───────────────────────────────────────────────────
+async function sendMessage(chatId: number | string, text: string, extra?: object) {
   if (!TG_TOKEN) return
   await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id:             chatId,
-      text,
-      parse_mode:          'HTML',
-      reply_to_message_id: replyToMessageId,
-    }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...extra }),
   })
 }
 
@@ -31,112 +27,126 @@ async function sendTyping(chatId: number | string) {
   })
 }
 
-// ─── System prompt for Claude ──────────────────────────────────────────────
+// ── In-memory pending actions (per chat) ──────────────────────────────────
+const pendingActions = new Map<string, { action: BotAction; description: string }>()
+
+// ── Claude system prompt ──────────────────────────────────────────────────
 function buildSystemPrompt(context: any): string {
   return `You are a helpful assistant for a driving school management system called DriveIndia.
-The admin is messaging you via Telegram to get information about their school or to make changes.
+The admin is messaging you via Telegram. Today is ${context.today}.
 
-Today is ${context.today}.
-
-SCHOOL DATA SUMMARY:
-- Total students: ${context.total_students}
-- Active batches: ${context.active_batches}
+SCHOOL DATA:
+- Total students: ${context.total_students}, Active batches: ${context.active_batches}
 - Sessions today: ${context.today_sessions}
-- Fee summary: ${context.fee_summary.paid} paid, ${context.fee_summary.partial} partial, ${context.fee_summary.unpaid} unpaid
-  Total collected: ₹${context.fee_summary.total_collected}, Pending: ₹${context.fee_summary.total_pending}
-  Payments awaiting confirmation: ${context.fee_summary.pending_confirmations}
-- Leads: ${context.lead_summary.new} new, ${context.lead_summary.interested} interested, ${context.lead_summary.enrolled} enrolled
-  Follow-ups due today: ${context.lead_summary.follow_up_today}
-- RTO: ${context.rto_summary.test_upcoming} tests upcoming, ${context.rto_summary.ll_pending} LL pending, ${context.rto_summary.dl_issued} DL issued
+- Fees: ${context.fee_summary.paid} paid, ${context.fee_summary.partial} partial, ${context.fee_summary.unpaid} unpaid | Collected: ₹${context.fee_summary.total_collected} | Pending: ₹${context.fee_summary.total_pending}
+- Payments awaiting confirmation: ${context.fee_summary.pending_confirmations}
+- Leads: ${context.lead_summary.new} new, ${context.lead_summary.interested} interested, ${context.lead_summary.enrolled} enrolled | Follow-ups today: ${context.lead_summary.follow_up_today}
+- RTO: ${context.rto_summary.test_upcoming} tests upcoming, ${context.rto_summary.ll_pending} LL pending
 
 TODAY'S SESSIONS:
-${context.today_attendance.map((s: any) =>
-  `  - ${s.batch}: Session ${s.session_num}, ${s.total_students} students, ${s.marked ? `marked (${s.present?.length ?? 0} present)` : 'NOT YET MARKED'}`
-).join('\n') || '  None today'}
+${context.today_attendance.map((s: any) => `  - ${s.batch}: Session ${s.session_num}, ${s.total_students} students, ${s.marked ? `MARKED (${s.present?.length ?? 0} present)` : 'NOT YET MARKED'}`).join('\n') || '  None today'}
 
 STUDENTS (${context.students.length}):
-${context.students.map((s: any) =>
-  `  - ${s.name} | ${s.phone} | ${s.batch} | ${s.sessions_done}/${s.sessions_total} sessions | Fee: ${s.fee_status} (balance ₹${s.fee_balance}) | RTO: ${s.test_date ? `test ${s.test_date}` : s.ll_number ? 'LL issued' : 'LL pending'}`
-).join('\n') || '  No students yet'}
+${context.students.map((s: any) => `  - ${s.name} | ${s.phone} | ${s.batch} | ${s.sessions_done}/${s.sessions_total} sessions | Fee: ${s.fee_status} (balance ₹${s.fee_balance}) | RTO: ${s.test_date ? `test ${s.test_date}` : s.ll_number ? 'LL issued' : 'LL pending'}`).join('\n') || '  No students yet'}
 
-INSTRUCTIONS:
-1. For QUERIES: Answer directly in plain text using the data above. Be concise. Use ₹ for money amounts.
-2. For ACTIONS: If the admin wants to make a change, respond with ONLY a JSON object in this format:
+RULES:
+1. QUERIES → answer directly, short, plain text, use ₹ for money
+2. ACTIONS → respond with ONLY a JSON block:
    {"action": "UPDATE_RTO", "payload": {"student_name": "...", "test_date": "YYYY-MM-DD", "test_venue": "..."}}
    {"action": "RECORD_PAYMENT", "payload": {"student_name": "...", "amount": 2000, "payment_mode": "cash"}}
    {"action": "ADD_LEAD", "payload": {"name": "...", "phone": "...", "course_type": "4-wheeler", "source": "phone"}}
    {"action": "UPDATE_LEAD_STATUS", "payload": {"phone": "...", "status": "enrolled"}}
-3. For CONFIRMATIONS: If the admin says YES/CONFIRM to a pending action, execute it.
-4. Keep answers SHORT — this is WhatsApp-style messaging.
-5. Use emojis sparingly for better readability.
-6. If you don't have enough info to do an action, ask for the missing detail.
-7. Never make up data. Only use what's in the school data above.`
+3. If admin says YES/CONFIRM/y → execute pending action
+4. Be SHORT. This is a chat interface.
+5. Never make up data. Only use what is given above.`
 }
 
-// ─── Pending action storage (in-memory, keyed by chatId) ───────────────────
-// In production you'd store this in Redis or the DB, but in-memory is fine for
-// a single-admin bot with low traffic
-const pendingActions = new Map<string, { action: BotAction; description: string }>()
-
-// ─── Main webhook handler ──────────────────────────────────────────────────
+// ── Webhook handler ────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  // Always respond 200 immediately so Telegram doesn't retry
   const body = await req.json().catch(() => null)
   if (!body?.message) return NextResponse.json({ ok: true })
 
   const { message } = body
-  const chatId    = message.chat?.id
-  const text      = message.text ?? ''
-  const msgId     = message.message_id
+  const chatId = String(message.chat?.id ?? '')
+  const text   = (message.text ?? '').trim()
+  const msgId  = message.message_id
 
   if (!chatId || !text) return NextResponse.json({ ok: true })
 
-  // ── Security: only the registered admin chat can use this bot ────────────
-  const allowedChatId = process.env.TELEGRAM_ADMIN_CHAT_ID
-  if (allowedChatId && String(chatId) !== String(allowedChatId)) {
-    await sendMessage(chatId, '❌ Unauthorized. This bot is private.')
+  // ── /link CODE — pair this Telegram chat to a school ────────────────────
+  if (text.startsWith('/link ') || text.startsWith('/link')) {
+    const code = text.replace('/link', '').trim()
+    if (!code || code.length !== 6) {
+      await sendMessage(chatId, '❌ Send <code>/link</code> followed by your 6-digit code.\nExample: <code>/link 482917</code>')
+      return NextResponse.json({ ok: true })
+    }
+    const allSettings = await db.select().from(school_settings)
+      .where(eq(school_settings.telegram_verify_code as any, code))
+    if (allSettings.length === 0) {
+      await sendMessage(chatId, '❌ Invalid code. Go to <b>Admin → Telegram bot</b> and generate a new code.')
+      return NextResponse.json({ ok: true })
+    }
+    const settings = allSettings[0]
+    await db.update(school_settings)
+      .set({ telegram_chat_id: chatId, telegram_verify_code: null as any, updated_at: new Date() })
+      .where(eq(school_settings.id, settings.id))
+    await sendMessage(chatId,
+      `✅ <b>Account linked!</b>\n\nYour DriveIndia school is now connected.\n\nTry asking:\n• "Who has pending fees?"\n• "Today's summary"\n• "Who missed class today?"`)
     return NextResponse.json({ ok: true })
   }
 
-  // Handle /start command
+  // ── /start — welcome ────────────────────────────────────────────────────
   if (text.startsWith('/start')) {
-    await sendMessage(chatId, `👋 <b>DriveIndia Bot</b>\n\nI can help you manage your driving school.\n\nAsk me anything:\n• "Who missed class today?"\n• "Which students haven't paid?"\n• "How many enquiries this week?"\n\nOr make changes:\n• "Set Priya's RTO test to 15 May at Coimbatore RTO"\n• "Mark Rahul's fee as paid ₹2000 cash"\n• "Add lead: Suresh 9876543000 4-wheeler walk-in"`)
+    // Check if already linked
+    const linked = await getSchoolIdForChat(chatId)
+    if (linked) {
+      await sendMessage(chatId, `👋 <b>Welcome back!</b>\n\nYou're already connected to your school.\n\nAsk me anything about your students, fees, or attendance.`)
+    } else {
+      await sendMessage(chatId,
+        `👋 <b>Welcome to DriveIndia Bot!</b>\n\nTo connect your school:\n1. Go to your DriveIndia dashboard\n2. Click <b>Telegram bot</b> in the menu\n3. Generate a pairing code\n4. Send <code>/link YOUR_CODE</code> here\n\nExample: <code>/link 482917</code>`)
+    }
     return NextResponse.json({ ok: true })
   }
 
-  // Handle /help command
+  // ── /help ────────────────────────────────────────────────────────────────
   if (text.startsWith('/help')) {
-    await sendMessage(chatId, `<b>What I can do:</b>\n\n<b>Queries:</b>\n• "Who attended today?"\n• "Who has pending fees?"\n• "What is Priya's progress?"\n• "Upcoming RTO tests?"\n• "Today's summary"\n• "Leads this week"\n\n<b>Actions:</b>\n• "Set [name]'s test date to [date] at [venue]"\n• "Mark [name] fee paid ₹[amount] [mode]"\n• "Add lead: [name] [phone] [course]"\n\nYour chat ID: <code>${chatId}</code>\nSet this as TELEGRAM_ADMIN_CHAT_ID in your .env`)
+    await sendMessage(chatId,
+      `<b>DriveIndia Bot — Commands</b>\n\n<b>Queries:</b>\n• Who missed class today?\n• Who has pending fees?\n• What is [name]'s progress?\n• Upcoming RTO tests?\n• Today's summary\n• How many new enquiries?\n\n<b>Actions:</b>\n• Set [name]'s test to [date] at [venue]\n• Mark [name] fee paid ₹[amount] cash\n• Add lead: [name] [phone] [course]\n\nNot linked? Send <code>/start</code> for setup instructions.`)
     return NextResponse.json({ ok: true })
   }
 
-  // Handle YES/CONFIRM for pending actions
-  const normalised = text.trim().toLowerCase()
-  if (normalised === 'yes' || normalised === 'confirm' || normalised === 'y') {
-    const pending = pendingActions.get(String(chatId))
+  // ── Get school from chat ID ───────────────────────────────────────────────
+  const schoolId = await getSchoolIdForChat(chatId)
+  if (!schoolId) {
+    await sendMessage(chatId,
+      `❌ Your account is not connected.\n\nGo to <b>Admin → Telegram bot</b>, generate a pairing code, then send:\n<code>/link YOUR_CODE</code>`)
+    return NextResponse.json({ ok: true })
+  }
+
+  // ── Handle YES/CONFIRM for pending actions ────────────────────────────────
+  const norm = text.toLowerCase()
+  if (norm === 'yes' || norm === 'y' || norm === 'confirm') {
+    const pending = pendingActions.get(chatId)
     if (pending) {
-      pendingActions.delete(String(chatId))
+      pendingActions.delete(chatId)
       await sendTyping(chatId)
-      // Get school ID for this admin
-      const schoolId = await getSchoolIdForChat(chatId)
-      if (!schoolId) { await sendMessage(chatId, '❌ Could not find your school.'); return NextResponse.json({ ok: true }) }
       const result = await executeAction(pending.action, schoolId)
-      await sendMessage(chatId, result, msgId)
+      await sendMessage(chatId, result)
       return NextResponse.json({ ok: true })
     }
   }
 
-  // Get school ID
-  const schoolId = await getSchoolIdForChat(chatId)
-  if (!schoolId) {
-    await sendMessage(chatId, `❌ Your Telegram chat ID (<code>${chatId}</code>) is not linked to any school.\n\nSet TELEGRAM_ADMIN_CHAT_ID=${chatId} in your Vercel environment variables.`)
-    return NextResponse.json({ ok: true })
+  // ── Cancel pending action ─────────────────────────────────────────────────
+  if (norm === 'no' || norm === 'cancel') {
+    if (pendingActions.has(chatId)) {
+      pendingActions.delete(chatId)
+      await sendMessage(chatId, '↩️ Action cancelled.')
+      return NextResponse.json({ ok: true })
+    }
   }
 
-  // Show typing indicator
+  // ── Show typing and call Claude ───────────────────────────────────────────
   await sendTyping(chatId)
-
-  // Build context and call Claude
   const context = await buildSchoolContext(schoolId)
   const systemPrompt = buildSystemPrompt(context)
 
@@ -152,90 +162,76 @@ export async function POST(req: NextRequest) {
   })
 
   if (!claudeRes.ok) {
-    await sendMessage(chatId, '⚠️ AI error. Try again in a moment.')
+    await sendMessage(chatId, '⚠️ AI unavailable. Try again in a moment.')
     return NextResponse.json({ ok: true })
   }
 
   const claudeData = await claudeRes.json()
   const reply = claudeData.content?.[0]?.text ?? ''
 
-  // Try to parse as action JSON
-  const actionMatch = reply.match(/\{"action"[\s\S]*?\}(?=\s*$|\n)/)
+  // Try to parse as action
+  const actionMatch = reply.match(/\{"action"[\s\S]*?\}/)
   if (actionMatch) {
     try {
       const parsed = JSON.parse(actionMatch[0])
       if (parsed.action && parsed.payload) {
         const action: BotAction = { type: parsed.action, payload: parsed.payload }
-        // Build a human-readable description of what will happen
         const desc = buildActionDescription(action)
-        pendingActions.set(String(chatId), { action, description: desc })
-        await sendMessage(chatId, `${desc}\n\nReply <b>YES</b> to confirm or anything else to cancel.`, msgId)
+        pendingActions.set(chatId, { action, description: desc })
+        await sendMessage(chatId, `${desc}\n\nReply <b>YES</b> to confirm or <b>NO</b> to cancel.`)
         return NextResponse.json({ ok: true })
       }
     } catch {}
   }
 
-  // Plain text response — send directly
-  // Telegram has 4096 char limit, truncate if needed
-  const finalReply = reply.length > 4000 ? reply.slice(0, 3990) + '…' : reply
-  await sendMessage(chatId, finalReply, msgId)
+  // Send plain reply (truncate to Telegram's 4096 limit)
+  await sendMessage(chatId, reply.length > 4000 ? reply.slice(0, 3990) + '…' : reply)
   return NextResponse.json({ ok: true })
 }
 
-async function getSchoolIdForChat(chatId: number | string): Promise<string | null> {
-  const adminPhone = process.env.TELEGRAM_ADMIN_PHONE
-  if (!adminPhone) return null
-  const [user] = await db.select().from(users).where(eq(users.phone, adminPhone))
-  return user?.school_id ?? null
+async function getSchoolIdForChat(chatId: string): Promise<string | null> {
+  const allSettings = await db.select().from(school_settings)
+    .where(eq(school_settings.telegram_chat_id as any, chatId))
+  return allSettings[0]?.school_id ?? null
 }
 
 function buildActionDescription(action: BotAction): string {
+  const p = action.payload
   switch (action.type) {
     case 'UPDATE_RTO': {
-      const { student_name, test_date, test_venue, ll_number, dl_number } = action.payload
-      const parts = [`Student: ${student_name}`]
-      if (test_date)  parts.push(`Test date: ${test_date}`)
-      if (test_venue) parts.push(`Venue: ${test_venue}`)
-      if (ll_number)  parts.push(`LL number: ${ll_number}`)
-      if (dl_number)  parts.push(`DL number: ${dl_number}`)
-      return `🗓 <b>Update RTO record?</b>\n${parts.join('\n')}`
+      const parts = [`Student: ${p.student_name}`]
+      if (p.test_date)  parts.push(`Test date: ${p.test_date}`)
+      if (p.test_venue) parts.push(`Venue: ${p.test_venue}`)
+      if (p.ll_number)  parts.push(`LL: ${p.ll_number}`)
+      if (p.dl_number)  parts.push(`DL: ${p.dl_number}`)
+      return `🗓 <b>Update RTO?</b>\n${parts.join('\n')}`
     }
-    case 'RECORD_PAYMENT': {
-      const { student_name, amount, payment_mode } = action.payload
-      return `💰 <b>Record payment?</b>\nStudent: ${student_name}\nAmount: ₹${amount}\nMode: ${payment_mode}`
-    }
-    case 'ADD_LEAD': {
-      const { name, phone, course_type, source } = action.payload
-      return `👤 <b>Add new lead?</b>\nName: ${name}\nPhone: ${phone}\nCourse: ${course_type}\nSource: ${source}`
-    }
-    case 'UPDATE_LEAD_STATUS': {
-      return `📋 <b>Update lead status?</b>\nPhone: ${action.payload.phone}\nNew status: ${action.payload.status}`
-    }
+    case 'RECORD_PAYMENT':
+      return `💰 <b>Record payment?</b>\nStudent: ${p.student_name}\nAmount: ₹${p.amount}\nMode: ${p.payment_mode}`
+    case 'ADD_LEAD':
+      return `👤 <b>Add lead?</b>\nName: ${p.name}\nPhone: ${p.phone}\nCourse: ${p.course_type}`
+    case 'UPDATE_LEAD_STATUS':
+      return `📋 <b>Update lead status?</b>\nPhone: ${p.phone}\nStatus: ${p.status}`
     default:
-      return `Perform action: ${JSON.stringify(action.payload)}`
+      return `Action: ${JSON.stringify(p)}`
   }
 }
 
-// Vercel CRON or one-time setup: register webhook with Telegram
-// Call GET /api/bot/telegram?setup=1 once after deploy
+// ── GET: register webhook with Telegram ────────────────────────────────────
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
-  if (searchParams.get('setup') !== '1') return NextResponse.json({ ok: true, message: 'Bot endpoint active' })
-
-  const origin = searchParams.get('origin')
-  const appUrl = origin ?? process.env.NEXT_PUBLIC_APP_URL
-  if (!appUrl || !TG_TOKEN) {
-    return NextResponse.json({ error: 'Set TELEGRAM_BOT_TOKEN and NEXT_PUBLIC_APP_URL in env' }, { status: 400 })
+  if (searchParams.get('setup') !== '1') {
+    return NextResponse.json({ ok: true, message: 'Bot webhook endpoint active' })
   }
-
-  if (!appUrl.startsWith('https://')) {
-    return NextResponse.json({
-      error: 'Telegram requires an HTTPS webhook URL. Deploy the app (or tunnel via ngrok) and set NEXT_PUBLIC_APP_URL to the secure address before registering the webhook.',
-    }, { status: 400 })
+  if (!TG_TOKEN) {
+    return NextResponse.json({ error: 'TELEGRAM_BOT_TOKEN not set in env' }, { status: 400 })
   }
-
-  const webhookUrl = `${appUrl}/api/bot/telegram`
-  const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/setWebhook`, {
+  const origin = searchParams.get('origin') ?? process.env.NEXT_PUBLIC_APP_URL ?? ''
+  if (!origin.startsWith('https://')) {
+    return NextResponse.json({ error: 'Telegram requires an HTTPS URL. Use your Vercel deployment URL.' }, { status: 400 })
+  }
+  const webhookUrl = `${origin}/api/bot/telegram`
+  const res  = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/setWebhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message'] }),
