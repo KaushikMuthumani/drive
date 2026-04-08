@@ -31,7 +31,7 @@ async function sendTyping(chatId: number | string) {
 // ── In-memory pending actions (per chat) ──────────────────────────────────
 const pendingActions = new Map<string, { action: BotAction; description: string }>()
 
-// ── Claude system prompt ──────────────────────────────────────────────────
+// ── Grok system prompt ───────────────────────────────────────────────────
 function buildSystemPrompt(context: any): string {
   return `You are a helpful assistant for a driving school management system called DriveIndia.
 The admin is messaging you via Telegram. Today is ${context.today}.
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Show typing and call Claude ───────────────────────────────────────────
+  // ── Show typing and call Grok ─────────────────────────────────────────────
   await sendTyping(chatId)
   const context = await buildSchoolContext(schoolId)
   const systemPrompt = buildSystemPrompt(context)
@@ -174,6 +174,8 @@ export async function POST(req: NextRequest) {
   })
 
   if (!grokRes.ok) {
+    const errBody = await grokRes.text().catch(() => '')
+    console.error('Grok API error:', grokRes.status, errBody)
     await sendMessage(chatId, '⚠️ AI unavailable. Try again in a moment.')
     return NextResponse.json({ ok: true })
   }
