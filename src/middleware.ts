@@ -2,7 +2,19 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { jwtVerify, SignJWT } from 'jose'
 
-const PUBLIC = ['/auth', '/home', '/api/auth', '/api/schools', '/_next', '/favicon', '/icons', '/manifest', '/offline', '/sw.js']
+const PUBLIC = [
+  '/auth',
+  '/home',
+  '/api/auth',
+  '/api/schools',
+  '/api/bot/telegram',
+  '/_next',
+  '/favicon',
+  '/icons',
+  '/manifest',
+  '/offline',
+  '/sw.js',
+]
 
 function getSecret() {
   return new TextEncoder().encode(process.env.JWT_SECRET ?? 'dev-secret-change-in-production-please')
